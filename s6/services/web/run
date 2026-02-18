@@ -1,0 +1,4 @@
+#!/command/with-contenv /bin/sh
+cd /opt/nginx-manager/web
+/usr/local/bin/bun run init-db.mjs
+exec /usr/local/bin/bun run start

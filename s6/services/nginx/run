@@ -1,0 +1,3 @@
+#!/command/with-contenv /bin/sh
+mkdir -p /data/logs
+exec nginx -g "daemon off;"

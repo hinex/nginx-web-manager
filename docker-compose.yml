@@ -1,0 +1,12 @@
+services:
+  nginx-manager:
+    build: .
+    image: hinex/nginx-web-manager:latest
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
