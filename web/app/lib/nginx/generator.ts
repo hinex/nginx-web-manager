@@ -15,9 +15,10 @@ import { buildStreamBlock } from "./templates/stream";
 import { buildHtpasswdContent, type AccessListWithRules } from "./templates/access";
 
 const NGINX_CONF_DIR = "/etc/nginx";
-const HOST_CONF_DIR = join(NGINX_CONF_DIR, "conf.d");
-const STREAM_CONF_DIR = join(NGINX_CONF_DIR, "stream.d");
-const AUTH_DIR = join(NGINX_CONF_DIR, "auth");
+const DATA_NGINX_DIR = "/data/nginx";
+const HOST_CONF_DIR = join(DATA_NGINX_DIR, "conf.d");
+const STREAM_CONF_DIR = join(DATA_NGINX_DIR, "stream.d");
+const AUTH_DIR = join(DATA_NGINX_DIR, "auth");
 
 /**
  * Generate all nginx configuration files from the database.
@@ -144,11 +145,11 @@ http {
         ""      $request_id;
     }
 
-    include /etc/nginx/conf.d/*.conf;
+    include /data/nginx/conf.d/*.conf;
 }
 
 stream {
-    include /etc/nginx/stream.d/*.conf;
+    include /data/nginx/stream.d/*.conf;
 }
 `;
   writeFileSync(join(NGINX_CONF_DIR, "nginx.conf"), config);

@@ -6,7 +6,7 @@ vi.mock("~/lib/db/connection", () => {
   const mockDb = {
     insert: vi.fn().mockReturnThis(),
     values: vi.fn().mockReturnThis(),
-    returning: vi.fn().mockReturnValue([{ id: 1, filePath: "/etc/nginx/conf.d/test.conf", content: "server {}", changeType: "manual_edit", userId: 1, message: null, createdAt: new Date() }]),
+    returning: vi.fn().mockReturnValue([{ id: 1, filePath: "/data/nginx/conf.d/test.conf", content: "server {}", changeType: "manual_edit", userId: 1, message: null, createdAt: new Date() }]),
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
@@ -27,7 +27,7 @@ import { saveVersion, getVersions, getVersion, diffVersions } from "./versions";
 describe("saveVersion", () => {
   it("creates a version record", async () => {
     const version = await saveVersion({
-      filePath: "/etc/nginx/conf.d/test.conf",
+      filePath: "/data/nginx/conf.d/test.conf",
       content: "server { listen 80; }",
       changeType: "manual_edit",
       userId: 1,

@@ -38,8 +38,9 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
 
   const addUpstream = (locIndex: number) => {
     const loc = locations[locIndex];
+    const defaultProtocol = loc.upstreams.length > 0 ? loc.upstreams[0].protocol : "http";
     updateLocation(locIndex, {
-      upstreams: [...loc.upstreams, { server: "", port: 80, weight: 1 }],
+      upstreams: [...loc.upstreams, { server: "", port: 80, weight: 1, protocol: defaultProtocol }],
     });
   };
 
@@ -127,8 +128,9 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
       case "proxy": {
         const count = loc.upstreams.length;
         if (count === 0) return "No upstreams";
-        if (count === 1) return `\u2192 ${loc.upstreams[0].server}:${loc.upstreams[0].port}`;
-        return `\u2192 ${count} upstreams (${loc.balanceMethod})`;
+        const proto = loc.upstreams[0]?.protocol || "http";
+        if (count === 1) return `${proto}:// \u2192 ${loc.upstreams[0].server}:${loc.upstreams[0].port}`;
+        return `${proto}:// \u2192 ${count} upstreams (${loc.balanceMethod})`;
       }
       case "static":
         return loc.staticDir ? `Static: ${loc.staticDir}` : "No directory set";
@@ -274,6 +276,22 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                             return (
                               <div key={upIndex}>
                                 <div className="flex items-center gap-2">
+                                  <select
+                                    value={upstream.protocol || "http"}
+                                    onChange={(e) => {
+                                      const newProtocol = e.target.value;
+                                      const loc = locations[locIndex];
+                                      const updatedUpstreams = loc.upstreams.map((u) => ({ ...u, protocol: newProtocol }));
+                                      updateLocation(locIndex, { upstreams: updatedUpstreams });
+                                    }}
+                                    className="flex h-9 rounded-md border border-input bg-transparent px-2 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring w-24"
+                                  >
+                                    <option value="http">http</option>
+                                    <option value="https">https</option>
+                                    <option value="grpc">grpc</option>
+                                    <option value="grpcs">grpcs</option>
+                                    <option value="fastcgi">fastcgi</option>
+                                  </select>
                                   <Input
                                     type="text"
                                     value={upstream.server}

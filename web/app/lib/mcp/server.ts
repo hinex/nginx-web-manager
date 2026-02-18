@@ -111,7 +111,7 @@ export async function handleResourceRead(uri: string): Promise<McpToolResult> {
       const filePath = configMatch[1];
       // Ensure the path is within the nginx directory for security
       const { resolve, normalize } = await import("path");
-      const NGINX_DIR = process.env.NGINX_DIR || "/etc/nginx";
+      const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
       const resolvedPath = resolve(NGINX_DIR, filePath);
       const normalizedNginxDir = normalize(NGINX_DIR);
 
@@ -148,7 +148,7 @@ export async function handleToolCall(
     switch (name) {
       case "list_configs": {
         const { listConfigFiles } = await import("~/lib/nginx/parser");
-        const NGINX_DIR = process.env.NGINX_DIR || "/etc/nginx";
+        const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
         const files = listConfigFiles(NGINX_DIR);
         return {
           content: [{ type: "text", text: JSON.stringify(files, null, 2) }],

@@ -20,7 +20,7 @@ export interface HostConfig {
     path: string;
     matchType: string;
     type: string;
-    upstreams: Array<{ server: string; port: number; weight: number }>;
+    upstreams: Array<{ server: string; port: number; weight: number; protocol?: string }>;
     balanceMethod: string;
     staticDir: string;
     cacheExpires: string;
@@ -200,26 +200,49 @@ export function buildServerBlock(
       case "proxy": {
         if (loc.upstreams && loc.upstreams.length > 0) {
           const upstreamName = `host_${host.id}_loc_${i}`;
-          const scheme = loc.forwardScheme || "http";
-          serverLines.push(`        proxy_pass ${scheme}://${upstreamName};`);
+          const protocol = loc.upstreams[0]?.protocol || "http";
+
+          switch (protocol) {
+            case "grpc":
+              serverLines.push(`        grpc_pass grpc://${upstreamName};`);
+              break;
+            case "grpcs":
+              serverLines.push(`        grpc_pass grpcs://${upstreamName};`);
+              break;
+            case "fastcgi": {
+              serverLines.push(`        fastcgi_pass ${upstreamName};`);
+              serverLines.push("        include fastcgi_params;");
+              serverLines.push("        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;");
+              break;
+            }
+            case "http":
+            case "https":
+            default:
+              serverLines.push(`        proxy_pass ${protocol}://${upstreamName};`);
+              break;
+          }
+
+          // Headers differ by protocol
+          if (protocol !== "grpc" && protocol !== "grpcs" && protocol !== "fastcgi") {
+            serverLines.push("        proxy_set_header Host $host;");
+            serverLines.push(
+              "        proxy_set_header X-Real-IP $remote_addr;"
+            );
+            serverLines.push(
+              "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
+            );
+            serverLines.push(
+              "        proxy_set_header X-Forwarded-Proto $scheme;"
+            );
+            serverLines.push("        proxy_http_version 1.1;");
+            serverLines.push(
+              '        proxy_set_header Upgrade $http_upgrade;'
+            );
+            serverLines.push(
+              '        proxy_set_header Connection "upgrade";'
+            );
+          }
         }
-        serverLines.push("        proxy_set_header Host $host;");
-        serverLines.push(
-          "        proxy_set_header X-Real-IP $remote_addr;"
-        );
-        serverLines.push(
-          "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
-        );
-        serverLines.push(
-          "        proxy_set_header X-Forwarded-Proto $scheme;"
-        );
-        serverLines.push("        proxy_http_version 1.1;");
-        serverLines.push(
-          '        proxy_set_header Upgrade $http_upgrade;'
-        );
-        serverLines.push(
-          '        proxy_set_header Connection "upgrade";'
-        );
         break;
       }
       case "static": {

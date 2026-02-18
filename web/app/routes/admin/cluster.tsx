@@ -58,7 +58,7 @@ export function meta() {
   return [{ title: "Cluster — Nginx Manager" }];
 }
 
-const NGINX_DIR = process.env.NGINX_DIR || "/etc/nginx";
+const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAdmin(request);

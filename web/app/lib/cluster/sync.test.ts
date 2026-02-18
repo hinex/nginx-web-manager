@@ -29,7 +29,7 @@ vi.mock("~/lib/db/schema", () => ({
 }));
 
 vi.mock("~/lib/nginx/parser", () => ({
-  listConfigFiles: vi.fn(() => ["/etc/nginx/nginx.conf", "/etc/nginx/conf.d/default.conf"]),
+  listConfigFiles: vi.fn(() => ["/data/nginx/nginx.conf", "/data/nginx/conf.d/default.conf"]),
 }));
 
 vi.mock("fs", () => ({

@@ -20,7 +20,7 @@ export interface LocationFormData {
   path: string;
   matchType: "prefix" | "exact" | "regex";
   type: "proxy" | "static" | "redirect" | "file";
-  upstreams: Array<{ server: string; port: number; weight: number }>;
+  upstreams: Array<{ server: string; port: number; weight: number; protocol: "http" | "https" | "grpc" | "grpcs" | "fastcgi" }>;
   balanceMethod: string;
   staticDir: string;
   cacheExpires: string;
@@ -169,9 +169,17 @@ export function HostForm({
     }
   }, [labelFetcher.data]);
 
+  const [nginxError, setNginxError] = useState<string | null>(null);
+
   useEffect(() => {
     if (actionData?.error) {
-      toast.error(actionData.error);
+      if (actionData.error.startsWith("Nginx config validation failed")) {
+        setNginxError(actionData.error);
+      } else {
+        toast.error(actionData.error);
+      }
+    } else {
+      setNginxError(null);
     }
   }, [actionData]);
 
@@ -325,6 +333,12 @@ export function HostForm({
       <input type="hidden" name="formData" value={JSON.stringify(formData)} />
 
       <Card>
+        {nginxError && (
+          <div className="mx-6 mt-6 rounded-md border border-destructive/50 bg-destructive/10 p-4">
+            <p className="text-sm font-medium text-destructive mb-2">Nginx Configuration Error</p>
+            <pre className="text-xs text-destructive/90 whitespace-pre-wrap font-mono overflow-x-auto">{nginxError.replace("Nginx config validation failed: ", "")}</pre>
+          </div>
+        )}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="border-b border-border px-4">
             <TabsList className="bg-transparent">

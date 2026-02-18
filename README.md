@@ -125,7 +125,9 @@ services:
 
 ```
 /etc/nginx/
-├── nginx.conf             # Main config (auto-generated)
+└── nginx.conf             # Main config (auto-generated, includes from /data/nginx/)
+
+/data/nginx/
 ├── conf.d/                # HTTP server blocks
 │   ├── admin.conf         # Admin panel proxy (:81 -> :3001)
 │   ├── default.conf       # Default catch-all server

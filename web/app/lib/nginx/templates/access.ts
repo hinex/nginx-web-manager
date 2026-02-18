@@ -36,7 +36,7 @@ export function buildAccessDirectives(accessList: AccessListWithRules): string {
   if (hasAuth) {
     lines.push(`    auth_basic "Restricted";`);
     lines.push(
-      `    auth_basic_user_file /etc/nginx/auth/access-list-${accessList.id}.htpasswd;`
+      `    auth_basic_user_file /data/nginx/auth/access-list-${accessList.id}.htpasswd;`
     );
   }
 

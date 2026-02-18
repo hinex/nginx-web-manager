@@ -97,6 +97,11 @@ export async function action({ request, params }: Route.ActionArgs) {
         if (!u.server?.trim()) return { error: "All upstreams must have a server address" };
         if (!u.port || u.port < 1 || u.port > 65535) return { error: "Upstream port must be 1-65535" };
       }
+      // Validate all upstreams in a location use the same protocol
+      const protocols = new Set(loc.upstreams.map((u: any) => u.protocol || "http"));
+      if (protocols.size > 1) {
+        return { error: `Proxy location "${loc.path}" has mixed upstream protocols. All upstreams in a location must use the same protocol.` };
+      }
     }
     if (loc.type === "static") {
       if (!loc.staticDir?.trim()) return { error: `Static location "${loc.path}" needs a directory path` };

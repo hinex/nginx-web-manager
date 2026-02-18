@@ -3,7 +3,7 @@
  */
 export function buildUpstreamBlock(
   name: string,
-  upstreams: Array<{ server: string; port: number; weight: number }>,
+  upstreams: Array<{ server: string; port: number; weight: number; protocol?: string }>,
   balanceMethod: string
 ): string {
   if (upstreams.length === 0) return "";

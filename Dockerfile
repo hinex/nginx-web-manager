@@ -38,10 +38,8 @@ RUN curl -fsSL https://bun.sh/install | bash \
 
 # Create data directories
 RUN mkdir -p /data/logs /data/error-pages/global /data/default-page /data/ssl/custom \
-    /data/acme-challenge /etc/letsencrypt /etc/nginx/conf.d /etc/nginx/stream.d /etc/nginx/auth
-
-# Remove default nginx config
-RUN rm -f /etc/nginx/conf.d/default.conf
+    /data/acme-challenge /data/nginx/conf.d /data/nginx/stream.d /data/nginx/auth \
+    /etc/letsencrypt
 
 # Copy web admin
 COPY --from=build-web /build/build /opt/nginx-manager/web/build

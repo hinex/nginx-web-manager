@@ -22,7 +22,7 @@ import {
 } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/etc/nginx";
+const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export async function action({ request }: Route.ActionArgs) {
   const user = await requireAdmin(request);

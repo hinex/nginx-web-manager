@@ -23,7 +23,7 @@ import { cn } from "~/lib/utils";
 import { toast } from "sonner";
 import { onTemplateInsert } from "~/lib/events/template-insert";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/etc/nginx";
+const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export function meta() {
   return [{ title: "Config Editor — Nginx Manager" }];

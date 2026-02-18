@@ -135,7 +135,7 @@ describe("buildAccessDirectives", () => {
     });
     expect(result).toContain('auth_basic "Restricted";');
     expect(result).toContain(
-      "auth_basic_user_file /etc/nginx/auth/access-list-1.htpasswd;"
+      "auth_basic_user_file /data/nginx/auth/access-list-1.htpasswd;"
     );
     expect(result).not.toContain("satisfy");
   });
@@ -581,6 +581,169 @@ describe("buildServerBlock", () => {
     expect(result).toContain("proxy_pass http://host_1_loc_0;");
     expect(result).toContain("alias /var/www/assets;");
     expect(result).toContain("return 301 https://example.com/new-page;");
+  });
+});
+
+// ─── Protocol Support ───────────────────────────────────
+
+describe("buildServerBlock protocol support", () => {
+  const baseHost: HostConfig = {
+    id: 1,
+    groupId: null,
+    domains: ["example.com"],
+    enabled: true,
+    sslType: "none",
+    sslForceHttps: false,
+    sslCertPath: null,
+    sslKeyPath: null,
+    hsts: false,
+    http2: true,
+    compression: false,
+    redirectWww: false,
+    clientMaxBodySize: "1m",
+    locations: [],
+    advancedNginx: null,
+    webhookUrl: null,
+    errorPagesDir: null,
+  };
+
+  it("generates proxy_pass with http protocol (default, no protocol field)", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        {
+          path: "/",
+          matchType: "prefix",
+          type: "proxy",
+          upstreams: [{ server: "127.0.0.1", port: 3000, weight: 1 }],
+          balanceMethod: "round_robin",
+          staticDir: "",
+          cacheExpires: "",
+          forwardScheme: "http",
+          forwardDomain: "",
+          forwardPath: "/",
+          preservePath: true,
+          statusCode: 301,
+          headers: {},
+          accessListId: null,
+        },
+      ],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain("proxy_pass http://host_1_loc_0;");
+    expect(result).toContain("proxy_set_header Host $host;");
+  });
+
+  it("generates proxy_pass with https protocol", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        {
+          path: "/",
+          matchType: "prefix",
+          type: "proxy",
+          upstreams: [{ server: "127.0.0.1", port: 443, weight: 1, protocol: "https" }],
+          balanceMethod: "round_robin",
+          staticDir: "",
+          cacheExpires: "",
+          forwardScheme: "http",
+          forwardDomain: "",
+          forwardPath: "/",
+          preservePath: true,
+          statusCode: 301,
+          headers: {},
+          accessListId: null,
+        },
+      ],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain("proxy_pass https://host_1_loc_0;");
+    expect(result).toContain("proxy_set_header Host $host;");
+  });
+
+  it("generates grpc_pass for grpc protocol", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        {
+          path: "/",
+          matchType: "prefix",
+          type: "proxy",
+          upstreams: [{ server: "127.0.0.1", port: 50051, weight: 1, protocol: "grpc" }],
+          balanceMethod: "round_robin",
+          staticDir: "",
+          cacheExpires: "",
+          forwardScheme: "http",
+          forwardDomain: "",
+          forwardPath: "/",
+          preservePath: true,
+          statusCode: 301,
+          headers: {},
+          accessListId: null,
+        },
+      ],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain("grpc_pass grpc://host_1_loc_0;");
+    expect(result).not.toContain("proxy_set_header");
+    expect(result).not.toContain("proxy_pass");
+  });
+
+  it("generates grpc_pass for grpcs protocol", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        {
+          path: "/",
+          matchType: "prefix",
+          type: "proxy",
+          upstreams: [{ server: "127.0.0.1", port: 50051, weight: 1, protocol: "grpcs" }],
+          balanceMethod: "round_robin",
+          staticDir: "",
+          cacheExpires: "",
+          forwardScheme: "http",
+          forwardDomain: "",
+          forwardPath: "/",
+          preservePath: true,
+          statusCode: 301,
+          headers: {},
+          accessListId: null,
+        },
+      ],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain("grpc_pass grpcs://host_1_loc_0;");
+    expect(result).not.toContain("proxy_set_header");
+  });
+
+  it("generates fastcgi_pass for fastcgi protocol", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        {
+          path: "/",
+          matchType: "prefix",
+          type: "proxy",
+          upstreams: [{ server: "127.0.0.1", port: 9000, weight: 1, protocol: "fastcgi" }],
+          balanceMethod: "round_robin",
+          staticDir: "",
+          cacheExpires: "",
+          forwardScheme: "http",
+          forwardDomain: "",
+          forwardPath: "/",
+          preservePath: true,
+          statusCode: 301,
+          headers: {},
+          accessListId: null,
+        },
+      ],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain("fastcgi_pass host_1_loc_0;");
+    expect(result).toContain("include fastcgi_params;");
+    expect(result).toContain("fastcgi_param SCRIPT_FILENAME");
+    expect(result).not.toContain("proxy_pass");
+    expect(result).not.toContain("proxy_set_header");
   });
 });
 

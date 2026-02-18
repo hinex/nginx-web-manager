@@ -64,7 +64,7 @@ export const hosts = sqliteTable("hosts", {
       path: string;
       matchType: "prefix" | "exact" | "regex";
       type: "proxy" | "static" | "redirect";
-      upstreams: Array<{ server: string; port: number; weight: number }>;
+      upstreams: Array<{ server: string; port: number; weight: number; protocol?: "http" | "https" | "grpc" | "grpcs" | "fastcgi" }>;
       balanceMethod: string;
       staticDir: string;
       cacheExpires: string;

@@ -4,7 +4,7 @@ import { listConfigFiles } from "~/lib/nginx/parser";
 import { readFileSync } from "fs";
 import { eq } from "drizzle-orm";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/etc/nginx";
+const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export interface SyncResult {
   nodeId: number;
