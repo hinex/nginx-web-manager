@@ -88,6 +88,19 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { error: "At least one location or stream port is required" };
   }
 
+  // Validate no duplicate location paths
+  const locationKeys = data.locations.map((l) => {
+    const prefix = l.matchType === "exact" ? "= " : l.matchType === "regex" ? "~ " : "";
+    return `${prefix}${l.path}`;
+  });
+  const seen = new Set<string>();
+  for (const key of locationKeys) {
+    if (seen.has(key)) {
+      return { error: `Duplicate location "${key}". Each location path + match type must be unique.` };
+    }
+    seen.add(key);
+  }
+
   for (const loc of data.locations) {
     if (loc.type === "proxy") {
       if (!loc.upstreams || loc.upstreams.length === 0) {

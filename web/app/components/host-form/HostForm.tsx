@@ -254,6 +254,22 @@ export function HostForm({
       return;
     }
 
+    // Validate no duplicate location paths
+    const locationKeys = formData.locations.map((l) => {
+      const prefix = l.matchType === "exact" ? "= " : l.matchType === "regex" ? "~ " : "";
+      return `${prefix}${l.path}`;
+    });
+    const seenPaths = new Set<string>();
+    for (const key of locationKeys) {
+      if (seenPaths.has(key)) {
+        e.preventDefault();
+        toast.error(`Duplicate location "${key}". Each location path + match type must be unique.`);
+        setActiveTab("locations");
+        return;
+      }
+      seenPaths.add(key);
+    }
+
     // Validate each location
     for (const loc of formData.locations) {
       if (loc.type === "proxy" && (!loc.upstreams || loc.upstreams.length === 0)) {
