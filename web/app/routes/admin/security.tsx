@@ -235,7 +235,7 @@ function TotpSection({ enabled: initialEnabled }: { enabled: boolean }) {
               <p className="text-sm font-medium">
                 Enter the 6-digit code from your authenticator app to verify:
               </p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Input
                   type="text"
                   inputMode="numeric"
@@ -441,12 +441,12 @@ function WebAuthnSection({
         )}
 
         {showNameInput ? (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Input
               placeholder="Device name (e.g. YubiKey 5)"
               value={deviceName}
               onChange={(e) => setDeviceName(e.target.value)}
-              className="max-w-xs"
+              className="flex-1 min-w-[200px] max-w-xs"
             />
             <Button onClick={handleRegister} disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

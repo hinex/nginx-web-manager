@@ -150,16 +150,16 @@ export default function AuditLogPage({ loaderData }: Route.ComponentProps) {
           </CardContent>
         </Card>
       ) : (
-        <Card glass>
+        <Card glass className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Timestamp</TableHead>
-                <TableHead>User</TableHead>
+                <TableHead className="hidden md:table-cell">User</TableHead>
                 <TableHead>Action</TableHead>
                 <TableHead>Entity</TableHead>
-                <TableHead>Entity ID</TableHead>
-                <TableHead>Details</TableHead>
+                <TableHead className="hidden sm:table-cell">Entity ID</TableHead>
+                <TableHead className="hidden lg:table-cell">Details</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -170,13 +170,13 @@ export default function AuditLogPage({ loaderData }: Route.ComponentProps) {
                       ? new Date(entry.createdAt).toLocaleString()
                       : "-"}
                   </TableCell>
-                  <TableCell>{entry.userEmail}</TableCell>
+                  <TableCell className="hidden md:table-cell">{entry.userEmail}</TableCell>
                   <TableCell>
                     <ActionBadge action={entry.action} />
                   </TableCell>
                   <TableCell>{entry.entity}</TableCell>
-                  <TableCell>{entry.entityId ?? "-"}</TableCell>
-                  <TableCell className="max-w-xs truncate">
+                  <TableCell className="hidden sm:table-cell">{entry.entityId ?? "-"}</TableCell>
+                  <TableCell className="hidden lg:table-cell max-w-xs truncate">
                     {entry.details ? JSON.stringify(entry.details) : "-"}
                   </TableCell>
                 </TableRow>

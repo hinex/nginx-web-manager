@@ -348,13 +348,13 @@ export default function DnsPage() {
               No DNS credentials configured. Add one to get started.
             </div>
           ) : (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Provider</TableHead>
-                    <TableHead>Created</TableHead>
+                    <TableHead className="hidden sm:table-cell">Created</TableHead>
                     <TableHead className="w-[70px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -367,7 +367,7 @@ export default function DnsPage() {
                           {cred.provider}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="hidden sm:table-cell text-muted-foreground">
                         {new Date(cred.createdAt).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
@@ -396,8 +396,8 @@ export default function DnsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Selectors */}
-          <div className="flex gap-4 items-end flex-wrap">
-            <div className="space-y-2 min-w-[200px] flex-1">
+          <div className="flex flex-col sm:flex-row gap-4 sm:items-end flex-wrap">
+            <div className="space-y-2 flex-1">
               <Label>Credential</Label>
               <Select
                 value={selectedCredId}
@@ -416,7 +416,7 @@ export default function DnsPage() {
               </Select>
             </div>
 
-            <div className="space-y-2 min-w-[200px] flex-1">
+            <div className="space-y-2 flex-1">
               <Label>Zone</Label>
               <Select
                 value={selectedZoneId}
@@ -478,15 +478,15 @@ export default function DnsPage() {
               No DNS records found for this zone.
             </div>
           ) : (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[80px]">Type</TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Content</TableHead>
-                    <TableHead className="w-[80px]">TTL</TableHead>
-                    <TableHead className="w-[80px]">Proxied</TableHead>
+                    <TableHead className="hidden sm:table-cell w-[80px]">TTL</TableHead>
+                    <TableHead className="hidden sm:table-cell w-[80px]">Proxied</TableHead>
                     <TableHead className="w-[70px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -511,8 +511,8 @@ export default function DnsPage() {
                           ? `${record.priority} ${record.content}`
                           : record.content}
                       </TableCell>
-                      <TableCell>{formatTtl(record.ttl)}</TableCell>
-                      <TableCell>
+                      <TableCell className="hidden sm:table-cell">{formatTtl(record.ttl)}</TableCell>
+                      <TableCell className="hidden sm:table-cell">
                         {record.proxied != null && (
                           <Badge
                             variant={record.proxied ? "default" : "outline"}
@@ -702,7 +702,7 @@ export default function DnsPage() {
                 onChange={(e) => setRecordContent(e.target.value)}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="rec-ttl">TTL</Label>
                 <Select value={recordTtl} onValueChange={setRecordTtl}>

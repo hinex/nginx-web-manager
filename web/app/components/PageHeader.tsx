@@ -77,7 +77,7 @@ export function PageHeader({
   return (
     <div className="animate-fade-in-up mb-8">
       <Breadcrumbs />
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div>
           <h1 className={cn("text-3xl font-bold tracking-tight", titleClassName)}>{title}</h1>
           {description && (

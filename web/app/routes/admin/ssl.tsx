@@ -157,13 +157,13 @@ export default function SSLPage({ loaderData }: Route.ComponentProps) {
           No proxy hosts with SSL enabled.
         </div>
       ) : (
-        <div className="rounded-md border">
+        <div className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Domains</TableHead>
                 <TableHead>SSL Type</TableHead>
-                <TableHead>Certificate Path</TableHead>
+                <TableHead className="hidden md:table-cell">Certificate Path</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -187,7 +187,7 @@ export default function SSLPage({ loaderData }: Route.ComponentProps) {
                           : "None"}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     <code className="text-xs font-mono text-muted-foreground">
                       {host.sslCertPath || "-"}
                     </code>

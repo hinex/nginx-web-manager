@@ -254,14 +254,14 @@ export default function AccessListsPage({ loaderData }: Route.ComponentProps) {
           No access lists configured yet.
         </div>
       ) : (
-        <div className="rounded-md border">
+        <div className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Satisfy</TableHead>
                 <TableHead>IP Rules</TableHead>
-                <TableHead>Auth Entries</TableHead>
+                <TableHead className="hidden sm:table-cell">Auth Entries</TableHead>
                 <TableHead className="w-[70px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -304,7 +304,7 @@ function AccessListRow({
         <Badge variant="secondary" className="capitalize">{list.satisfy}</Badge>
       </TableCell>
       <TableCell>{list.clientCount}</TableCell>
-      <TableCell>{list.authCount}</TableCell>
+      <TableCell className="hidden sm:table-cell">{list.authCount}</TableCell>
       <TableCell>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -447,7 +447,7 @@ function AccessListForm({
         <CardContent>
           <form onSubmit={handleSubmit}>
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Name</Label>
                   <Input

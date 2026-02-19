@@ -265,15 +265,15 @@ export default function ClusterPage({ loaderData }: Route.ComponentProps) {
           No cluster nodes configured. Add a worker node to get started.
         </div>
       ) : (
-        <div className="rounded-md border">
+        <div className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>URL</TableHead>
+                <TableHead className="hidden sm:table-cell">URL</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Last Sync</TableHead>
+                <TableHead className="hidden md:table-cell">Last Sync</TableHead>
                 <TableHead className="w-[140px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -301,7 +301,7 @@ export default function ClusterPage({ loaderData }: Route.ComponentProps) {
               No config files found.
             </div>
           ) : (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -464,7 +464,7 @@ function NodeRow({ node }: { node: NodeData }) {
   return (
     <TableRow className="hover:bg-muted/30 transition-colors">
       <TableCell className="font-medium">{node.name}</TableCell>
-      <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate">
+      <TableCell className="hidden sm:table-cell text-muted-foreground text-sm max-w-[200px] truncate">
         {node.url}
       </TableCell>
       <TableCell>
@@ -473,7 +473,7 @@ function NodeRow({ node }: { node: NodeData }) {
       <TableCell>
         <StatusBadge status={node.status} lastError={node.lastError} />
       </TableCell>
-      <TableCell className="text-sm text-muted-foreground">
+      <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
         {node.lastSyncAt
           ? new Date(node.lastSyncAt).toLocaleString()
           : "Never"}

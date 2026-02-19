@@ -421,14 +421,14 @@ function AllHostsTable({
   groupMap: Map<number, GroupItem>;
 }) {
   return (
-    <div className="rounded-md border">
+    <div className="rounded-md border overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Type</TableHead>
             <TableHead>Domains</TableHead>
-            <TableHead>Labels</TableHead>
-            <TableHead>Info</TableHead>
+            <TableHead className="hidden lg:table-cell">Labels</TableHead>
+            <TableHead className="hidden sm:table-cell">Info</TableHead>
             <TableHead>SSL</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="w-[70px]">Actions</TableHead>
@@ -502,14 +502,14 @@ function GroupedHostsView({
               {section.hosts.length}
             </Badge>
           </div>
-          <div className="rounded-md border">
+          <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Type</TableHead>
                   <TableHead>Domains</TableHead>
-                  <TableHead>Labels</TableHead>
-                  <TableHead>Info</TableHead>
+                  <TableHead className="hidden lg:table-cell">Labels</TableHead>
+                  <TableHead className="hidden sm:table-cell">Info</TableHead>
                   <TableHead>SSL</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-[70px]">Actions</TableHead>
@@ -598,7 +598,7 @@ function HostRow({
       </TableCell>
 
       {/* Labels */}
-      <TableCell>
+      <TableCell className="hidden lg:table-cell">
         <div className="flex flex-wrap gap-1">
           {host.hostLabels.map((label) => (
             <span
@@ -612,7 +612,7 @@ function HostRow({
       </TableCell>
 
       {/* Type-specific info */}
-      <TableCell className="text-sm text-muted-foreground">
+      <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
         {typeInfo}
       </TableCell>
 

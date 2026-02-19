@@ -72,7 +72,7 @@ export default function LogsPage({ loaderData }: Route.ComponentProps) {
 
       <Card glass>
         <CardContent className="p-6">
-          <div className="flex flex-wrap items-end gap-4 mb-4">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 sm:gap-4 mb-4">
             <div>
               <Label htmlFor="host">Host</Label>
               <select

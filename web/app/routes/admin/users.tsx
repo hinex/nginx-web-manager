@@ -220,14 +220,14 @@ export default function UsersPage({ loaderData }: Route.ComponentProps) {
           No users found.
         </div>
       ) : (
-        <div className="rounded-md border">
+        <div className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
+                <TableHead className="hidden sm:table-cell">Email</TableHead>
                 <TableHead>Role</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead className="hidden md:table-cell">Created</TableHead>
                 <TableHead className="w-[70px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -285,11 +285,11 @@ function UserRow({
   return (
     <TableRow className="hover:bg-muted/30 transition-colors">
       <TableCell className="font-medium">{user.name}</TableCell>
-      <TableCell>{user.email}</TableCell>
+      <TableCell className="hidden sm:table-cell">{user.email}</TableCell>
       <TableCell>
         <RoleBadge role={user.role} />
       </TableCell>
-      <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+      <TableCell className="hidden md:table-cell">{new Date(user.createdAt).toLocaleDateString()}</TableCell>
       <TableCell>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

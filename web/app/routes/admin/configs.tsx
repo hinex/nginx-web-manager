@@ -17,7 +17,7 @@ import {
   AlertDialogCancel,
 } from "~/components/ui/alert-dialog";
 import {
-  File, Folder, FolderOpen, Code, Blocks, Save, History, RotateCcw, X,
+  File, Folder, FolderOpen, Code, Blocks, Save, History, RotateCcw, X, Menu,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { toast } from "sonner";
@@ -286,10 +286,30 @@ export default function ConfigsPage() {
     });
   }, []);
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Auto-close sidebar on mobile after file selection
+  const handleFileSelect = useCallback((filePath: string) => {
+    loadFile(filePath);
+    setSidebarOpen(false);
+  }, [loadFile]);
+
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
+    <div className="flex h-[calc(100vh-3.5rem)] relative">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-20 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* File tree sidebar */}
-      <div className="w-64 shrink-0 border-r border-border overflow-y-auto bg-card">
+      <div className={cn(
+        "w-64 shrink-0 border-r border-border overflow-y-auto bg-card z-30",
+        "fixed inset-y-0 left-0 top-14 transition-transform duration-200 md:static md:translate-x-0",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
         <div className="px-3 py-3">
           <h3 className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
             Config Files
@@ -299,7 +319,7 @@ export default function ConfigsPage() {
           files={files}
           baseDir={baseDir}
           selectedFile={selectedFile}
-          onSelect={loadFile}
+          onSelect={handleFileSelect}
         />
       </div>
 
@@ -310,6 +330,12 @@ export default function ConfigsPage() {
             {/* Toolbar */}
             <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="md:hidden p-1 rounded hover:bg-muted/50 text-muted-foreground shrink-0"
+                >
+                  <Menu className="h-4 w-4" />
+                </button>
                 <span className="text-sm font-mono text-muted-foreground truncate">
                   {selectedFile.replace(baseDir + "/", "")}
                 </span>
@@ -399,6 +425,14 @@ export default function ConfigsPage() {
               <Code className="h-12 w-12 mx-auto mb-3 opacity-30" />
               <p className="text-lg">Select a config file to edit</p>
               <p className="text-sm mt-1">Choose a file from the sidebar to start editing</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4 md:hidden"
+                onClick={() => setSidebarOpen(true)}
+              >
+                <Menu className="h-4 w-4 mr-1.5" /> Open File Browser
+              </Button>
             </div>
           </div>
         )}

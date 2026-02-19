@@ -164,7 +164,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
       </div>
 
       {/* Upstream stats */}
-      <div className="grid grid-cols-3 gap-4 animate-stagger">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 animate-stagger">
         <HostStatCard
           label="Total Upstreams"
           value={d.totalUpstreams}
@@ -265,18 +265,16 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                         actionDotColor(entry.action)
                       )}
                     />
-                    <div className="flex flex-1 items-center gap-3 text-sm min-w-0">
+                    <div className="flex flex-1 items-center gap-2 sm:gap-3 text-sm min-w-0 flex-wrap">
                       <ActionBadge action={entry.action} />
                       <span className="text-muted-foreground">{entry.entity}</span>
                       {entry.entityId && (
                         <span className="text-muted-foreground">#{entry.entityId}</span>
                       )}
-                      {entry.userEmail && (
-                        <span className="ml-auto text-xs text-muted-foreground shrink-0">
-                          {entry.userEmail}
-                        </span>
-                      )}
-                      <span className="text-xs text-muted-foreground shrink-0">
+                      <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                        {entry.userEmail && (
+                          <span className="mr-2">{entry.userEmail}</span>
+                        )}
                         {entry.createdAt ? formatRelativeTime(entry.createdAt) : "-"}
                       </span>
                     </div>
