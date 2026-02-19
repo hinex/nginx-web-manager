@@ -50,6 +50,13 @@
       "when": 1771500200000,
       "tag": "0011_config_sync_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1771500300000,
+      "tag": "0012_host_basic_auth",
+      "breakpoints": true
     }
   ]
 }

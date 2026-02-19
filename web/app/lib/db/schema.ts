@@ -92,6 +92,9 @@ export const hosts = sqliteTable("hosts", {
   // Common
   webhookUrl: text("webhook_url"),
   advancedNginx: text("advanced_nginx"),
+  basicAuth: text("basic_auth", { mode: "json" })
+    .$type<{ enabled: boolean; users: Array<{ username: string; password: string }> } | null>()
+    .default(null),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),

@@ -518,6 +518,95 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                     )}
                   </div>
 
+                  {/* HTTP Basic Auth */}
+                  <div>
+                    <Label className="text-xs mb-1">HTTP Basic Auth</Label>
+                    <select
+                      value={
+                        location.basicAuth === undefined || location.basicAuth === null
+                          ? "inherit"
+                          : location.basicAuth.enabled === false
+                          ? "off"
+                          : "custom"
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "inherit") {
+                          updateLocation(locIndex, { basicAuth: null });
+                        } else if (val === "off") {
+                          updateLocation(locIndex, { basicAuth: { enabled: false, users: [] } });
+                        } else {
+                          updateLocation(locIndex, {
+                            basicAuth: { enabled: true, users: [{ username: "", password: "" }] },
+                          });
+                        }
+                      }}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="inherit">Inherit from host</option>
+                      <option value="off">Disable</option>
+                      <option value="custom">Custom</option>
+                    </select>
+
+                    {location.basicAuth && location.basicAuth.enabled && (
+                      <div className="mt-3 space-y-2">
+                        {location.basicAuth.users.map((user, uIdx) => (
+                          <div key={uIdx} className="flex items-center gap-2">
+                            <Input
+                              type="text"
+                              value={user.username}
+                              onChange={(e) => {
+                                const users = [...(location.basicAuth as any).users];
+                                users[uIdx] = { ...users[uIdx], username: e.target.value };
+                                updateLocation(locIndex, { basicAuth: { enabled: true, users } });
+                              }}
+                              placeholder="Username"
+                              className="text-xs flex-1"
+                            />
+                            <Input
+                              type="password"
+                              value={user.password}
+                              onChange={(e) => {
+                                const users = [...(location.basicAuth as any).users];
+                                users[uIdx] = { ...users[uIdx], password: e.target.value };
+                                updateLocation(locIndex, { basicAuth: { enabled: true, users } });
+                              }}
+                              placeholder="Password"
+                              className="text-xs flex-1"
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              onClick={() => {
+                                const users = (location.basicAuth as any).users.filter(
+                                  (_: any, i: number) => i !== uIdx
+                                );
+                                updateLocation(locIndex, {
+                                  basicAuth: users.length > 0 ? { enabled: true, users } : null,
+                                });
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          type="button"
+                          onClick={() => {
+                            const users = [...(location.basicAuth as any).users, { username: "", password: "" }];
+                            updateLocation(locIndex, { basicAuth: { enabled: true, users } });
+                          }}
+                        >
+                          <Plus className="mr-2 h-3 w-3" />
+                          Add User
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Access List */}
                   {accessLists.length > 0 && (
                     <div>

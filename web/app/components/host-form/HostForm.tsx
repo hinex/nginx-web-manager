@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { LocationsTab } from "./LocationsTab";
 import { SslTab } from "./SslTab";
 import { AdvancedTab } from "./AdvancedTab";
+import { AuthTab } from "./AuthTab";
 import { GroupCombobox } from "./GroupCombobox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Card, CardContent } from "~/components/ui/card";
@@ -31,6 +32,7 @@ export interface LocationFormData {
   statusCode: number;
   headers: Record<string, string>;
   accessListId: number | null;
+  basicAuth?: { enabled: boolean; users: Array<{ username: string; password: string }> } | { enabled: false } | null;
 }
 
 export interface StreamPortFormData {
@@ -66,6 +68,7 @@ export interface HostFormData {
   webhookUrl: string;
   advancedNginx: string;
   clientMaxBodySize: string;
+  basicAuth: { enabled: boolean; users: Array<{ username: string; password: string }> } | null;
 }
 
 export const defaultLocation: LocationFormData = {
@@ -114,6 +117,7 @@ const defaultFormData: HostFormData = {
   webhookUrl: "",
   advancedNginx: "",
   clientMaxBodySize: "",
+  basicAuth: null,
 };
 
 export function HostForm({
@@ -333,6 +337,7 @@ export function HostForm({
   const tabs: Array<{ value: string; label: string }> = [
     { value: "general", label: "General" },
     { value: "locations", label: "Locations" },
+    { value: "auth", label: "Auth" },
   ];
   if (showSsl) tabs.push({ value: "ssl", label: "SSL" });
   tabs.push({ value: "advanced", label: "Advanced" });
@@ -497,6 +502,14 @@ export function HostForm({
                 locations={formData.locations}
                 setLocations={(locations) => update({ locations })}
                 accessLists={accessLists}
+              />
+            </TabsContent>
+
+            {/* Auth Tab */}
+            <TabsContent value="auth" className="mt-0">
+              <AuthTab
+                basicAuth={formData.basicAuth}
+                setBasicAuth={(basicAuth) => update({ basicAuth })}
               />
             </TabsContent>
 

@@ -36,6 +36,7 @@ export function generateAllConfigs() {
   generateAdminConfig();
   generateDefaultServerConfig();
   generateAccessListFiles();
+  generateHostAuthFiles();
 
   // Load access lists for server block generation
   const accessListMap = loadAccessLists();
@@ -242,6 +243,37 @@ export function generateAccessListFiles() {
   }
 }
 
+/**
+ * Generate htpasswd files for hosts with inline basic auth.
+ */
+function generateHostAuthFiles() {
+  // Clean old host auth files
+  cleanDir(AUTH_DIR, "host-");
+
+  const allHosts = db.select().from(hosts).all();
+  for (const host of allHosts) {
+    if (!host.enabled) continue;
+
+    const basicAuth = (host as any).basicAuth;
+
+    // Host-level htpasswd
+    if (basicAuth?.enabled && basicAuth.users?.length > 0) {
+      const content = buildHtpasswdContent(basicAuth.users);
+      writeFileSync(join(AUTH_DIR, `host-${host.id}.htpasswd`), content);
+    }
+
+    // Per-location htpasswd
+    const locations = (host.locations ?? []) as any[];
+    for (let i = 0; i < locations.length; i++) {
+      const loc = locations[i];
+      if (loc.basicAuth?.enabled && loc.basicAuth.users?.length > 0) {
+        const content = buildHtpasswdContent(loc.basicAuth.users);
+        writeFileSync(join(AUTH_DIR, `host-${host.id}-loc-${i}.htpasswd`), content);
+      }
+    }
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────
 
 function mapHostToConfig(host: typeof hosts.$inferSelect): HostConfig {
@@ -290,10 +322,12 @@ function mapHostToConfig(host: typeof hosts.$inferSelect): HostConfig {
       statusCode: loc.statusCode ?? 301,
       headers: loc.headers ?? {},
       accessListId: loc.accessListId ?? null,
+      basicAuth: loc.basicAuth ?? null,
     })),
     advancedNginx: host.advancedNginx,
     webhookUrl: host.webhookUrl,
     errorPagesDir,
+    basicAuth: (host as any).basicAuth ?? null,
   };
 }
 

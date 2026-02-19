@@ -1,6 +1,6 @@
 import { buildUpstreamBlock } from "./upstream";
 import { buildSslDirectives } from "./ssl";
-import { buildAccessDirectives, type AccessListWithRules } from "./access";
+import { buildAccessDirectives, buildBasicAuthDirectives, buildBasicAuthOff, type AccessListWithRules } from "./access";
 
 export interface HostConfig {
   id: number;
@@ -31,10 +31,12 @@ export interface HostConfig {
     statusCode: number;
     headers: Record<string, string>;
     accessListId: number | null;
+    basicAuth?: { enabled: boolean; users: Array<{ username: string; password: string }> } | { enabled: false } | null;
   }>;
   advancedNginx: string | null;
   webhookUrl: string | null;
   errorPagesDir: string | null;
+  basicAuth?: { enabled: boolean; users: Array<{ username: string; password: string }> } | null;
 }
 
 /**
@@ -193,6 +195,22 @@ export function buildServerBlock(
     if (loc.accessListId && accessLists.has(loc.accessListId)) {
       const acl = accessLists.get(loc.accessListId)!;
       serverLines.push(buildAccessDirectives(acl));
+      serverLines.push("");
+    }
+
+    // Inline basic auth
+    const locAuth = loc.basicAuth;
+    if (locAuth && "enabled" in locAuth && locAuth.enabled && (locAuth as any).users?.length > 0) {
+      // Location has its own auth
+      serverLines.push(buildBasicAuthDirectives(`/data/nginx/auth/host-${host.id}-loc-${i}.htpasswd`));
+      serverLines.push("");
+    } else if (locAuth && "enabled" in locAuth && !locAuth.enabled) {
+      // Location explicitly disables auth
+      serverLines.push(buildBasicAuthOff());
+      serverLines.push("");
+    } else if (host.basicAuth?.enabled && (host.basicAuth as any).users?.length > 0) {
+      // Inherit from host
+      serverLines.push(buildBasicAuthDirectives(`/data/nginx/auth/host-${host.id}.htpasswd`));
       serverLines.push("");
     }
 

@@ -10,6 +10,7 @@ import { getSessionUser } from "~/lib/auth/session.server";
 import { generateAllConfigs } from "~/lib/nginx/generator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { validateNginxConfig } from "~/lib/nginx/validator";
+import { hashBasicAuthPasswords } from "~/lib/auth/hash-basic-auth";
 
 export function meta() {
   return [{ title: "Edit Host — Nginx Manager" }];
@@ -140,6 +141,12 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { error: "Custom SSL requires both certificate and key paths" };
   }
 
+  // Load existing host for password preservation
+  const existingHost = db.select().from(hosts).where(eq(hosts.id, id)).get();
+  const existingBasicAuth = (existingHost as any)?.basicAuth ?? null;
+  const existingLocations = (existingHost?.locations as any[]) ?? [];
+  const hashed = await hashBasicAuthPasswords(data.basicAuth, data.locations, existingBasicAuth, existingLocations);
+
   db.update(hosts)
     .set({
       domains: data.domains,
@@ -153,7 +160,8 @@ export async function action({ request, params }: Route.ActionArgs) {
       http2: data.http2,
       compression: data.compression,
       redirectWww: data.redirectWww ?? false,
-      locations: data.locations as any,
+      locations: hashed.locations as any,
+      basicAuth: hashed.basicAuth as any,
       streamPorts: data.streamPorts as any,
       webhookUrl: data.webhookUrl || undefined,
       advancedNginx: data.advancedNginx || undefined,
@@ -214,6 +222,15 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
     compression: host.compression,
     redirectWww: host.redirectWww,
     locations: host.locations as any ?? [],
+    basicAuth: (host as any).basicAuth
+      ? {
+          ...(host as any).basicAuth,
+          users: ((host as any).basicAuth.users ?? []).map((u: any) => ({
+            username: u.username,
+            password: "", // don't expose hash to client
+          })),
+        }
+      : null,
     streamPorts: host.streamPorts as any ?? [],
     webhookUrl: host.webhookUrl || "",
     advancedNginx: host.advancedNginx || "",

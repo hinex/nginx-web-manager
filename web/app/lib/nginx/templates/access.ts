@@ -54,3 +54,20 @@ export function buildHtpasswdContent(
     .map((entry) => `${entry.username}:${entry.password}`)
     .join("\n");
 }
+
+/**
+ * Builds auth_basic directives for inline basic auth on host/location.
+ */
+export function buildBasicAuthDirectives(htpasswdPath: string): string {
+  const lines: string[] = [];
+  lines.push(`    auth_basic "Restricted";`);
+  lines.push(`    auth_basic_user_file ${htpasswdPath};`);
+  return lines.join("\n");
+}
+
+/**
+ * Builds auth_basic off directive to explicitly disable inherited auth.
+ */
+export function buildBasicAuthOff(): string {
+  return `    auth_basic off;`;
+}

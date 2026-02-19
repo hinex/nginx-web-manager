@@ -9,6 +9,7 @@ import { getSessionUser } from "~/lib/auth/session.server";
 import { generateAllConfigs } from "~/lib/nginx/generator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { validateNginxConfig } from "~/lib/nginx/validator";
+import { hashBasicAuthPasswords } from "~/lib/auth/hash-basic-auth";
 
 export function meta() {
   return [{ title: "Add Host — Nginx Manager" }];
@@ -119,6 +120,9 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: "Custom SSL requires both certificate and key paths" };
   }
 
+  // Hash basic auth passwords
+  const hashed = await hashBasicAuthPasswords(data.basicAuth, data.locations);
+
   const result = db.insert(hosts)
     .values({
       domains: data.domains,
@@ -132,7 +136,8 @@ export async function action({ request }: Route.ActionArgs) {
       http2: data.http2,
       compression: data.compression,
       redirectWww: data.redirectWww ?? false,
-      locations: data.locations as any,
+      locations: hashed.locations as any,
+      basicAuth: hashed.basicAuth as any,
       streamPorts: data.streamPorts as any,
       webhookUrl: data.webhookUrl || undefined,
       advancedNginx: data.advancedNginx || undefined,
