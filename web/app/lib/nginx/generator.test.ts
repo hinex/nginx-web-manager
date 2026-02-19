@@ -9,6 +9,8 @@ import { buildSslDirectives } from "./templates/ssl";
 import {
   buildAccessDirectives,
   buildHtpasswdContent,
+  buildBasicAuthDirectives,
+  buildBasicAuthOff,
 } from "./templates/access";
 import { buildServerBlock, type HostConfig } from "./templates/server-block";
 import { buildStreamBlock } from "./templates/stream";
@@ -784,5 +786,142 @@ describe("buildServerBlock edge cases", () => {
     const result = buildServerBlock(host, new Map());
     // Should not throw
     expect(result).toContain("server {");
+  });
+});
+
+// ─── Basic Auth Directives ──────────────────────────────
+
+describe("buildBasicAuthDirectives", () => {
+  it("generates auth_basic and auth_basic_user_file directives", () => {
+    const result = buildBasicAuthDirectives("/data/nginx/auth/host-1.htpasswd");
+    expect(result).toContain('auth_basic "Restricted";');
+    expect(result).toContain("auth_basic_user_file /data/nginx/auth/host-1.htpasswd;");
+  });
+});
+
+describe("buildBasicAuthOff", () => {
+  it("generates auth_basic off directive", () => {
+    const result = buildBasicAuthOff();
+    expect(result).toBe("    auth_basic off;");
+  });
+});
+
+// ─── Basic Auth in Server Block ─────────────────────────
+
+describe("buildServerBlock basicAuth", () => {
+  const baseHost: HostConfig = {
+    id: 1,
+    groupId: null,
+    domains: ["example.com"],
+    enabled: true,
+    sslType: "none",
+    sslForceHttps: false,
+    sslCertPath: null,
+    sslKeyPath: null,
+    hsts: false,
+    http2: true,
+    compression: false,
+    redirectWww: false,
+    clientMaxBodySize: "1m",
+    locations: [],
+    advancedNginx: null,
+    webhookUrl: null,
+    errorPagesDir: null,
+  };
+
+  const baseLoc = {
+    path: "/",
+    matchType: "prefix" as const,
+    type: "proxy" as const,
+    upstreams: [{ server: "127.0.0.1", port: 3000, weight: 1 }],
+    balanceMethod: "round_robin",
+    staticDir: "",
+    cacheExpires: "",
+    forwardScheme: "http",
+    forwardDomain: "",
+    forwardPath: "/",
+    preservePath: true,
+    statusCode: 301,
+    headers: {},
+    accessListId: null,
+  };
+
+  it("inherits host-level auth when location has no basicAuth", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      basicAuth: {
+        enabled: true,
+        users: [{ username: "admin", password: "$2b$10$hash" }],
+      },
+      locations: [{ ...baseLoc }],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain('auth_basic "Restricted";');
+    expect(result).toContain("auth_basic_user_file /data/nginx/auth/host-1.htpasswd;");
+  });
+
+  it("outputs auth_basic off when location explicitly disables auth", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      basicAuth: {
+        enabled: true,
+        users: [{ username: "admin", password: "$2b$10$hash" }],
+      },
+      locations: [{ ...baseLoc, basicAuth: { enabled: false } }],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain("auth_basic off;");
+    expect(result).not.toContain("auth_basic_user_file");
+  });
+
+  it("uses location-level htpasswd when location has its own basicAuth", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      basicAuth: {
+        enabled: true,
+        users: [{ username: "admin", password: "$2b$10$hosthash" }],
+      },
+      locations: [
+        {
+          ...baseLoc,
+          basicAuth: {
+            enabled: true,
+            users: [{ username: "locadmin", password: "$2b$10$lochash" }],
+          },
+        },
+      ],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain('auth_basic "Restricted";');
+    expect(result).toContain("auth_basic_user_file /data/nginx/auth/host-1-loc-0.htpasswd;");
+    expect(result).not.toContain("auth_basic_user_file /data/nginx/auth/host-1.htpasswd;");
+  });
+
+  it("uses location htpasswd when only location has basicAuth", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        {
+          ...baseLoc,
+          basicAuth: {
+            enabled: true,
+            users: [{ username: "locuser", password: "$2b$10$hash" }],
+          },
+        },
+      ],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).toContain('auth_basic "Restricted";');
+    expect(result).toContain("auth_basic_user_file /data/nginx/auth/host-1-loc-0.htpasswd;");
+  });
+
+  it("outputs no auth directives when neither host nor location has basicAuth", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [{ ...baseLoc }],
+    };
+    const result = buildServerBlock(host, new Map());
+    expect(result).not.toContain("auth_basic");
+    expect(result).not.toContain("auth_basic_user_file");
   });
 });
