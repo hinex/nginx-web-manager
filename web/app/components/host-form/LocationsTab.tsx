@@ -200,7 +200,7 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
               {expandedIndex === locIndex && (
                 <div className="p-4 space-y-4 border-t">
                   {/* Row 1: Path + Match Type + Type */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <Label className="text-xs mb-1">Path</Label>
                       <Input

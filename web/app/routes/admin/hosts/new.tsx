@@ -187,6 +187,7 @@ export default function NewHost({ loaderData }: Route.ComponentProps) {
       <PageHeader
         title="Add Host"
         description="Configure a new reverse proxy host"
+        backHref="/admin/hosts"
       />
       <HostForm
         groups={groups}

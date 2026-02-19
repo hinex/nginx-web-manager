@@ -1,5 +1,5 @@
 import { useMatches, Link } from "react-router";
-import { ChevronRight, Home } from "lucide-react";
+import { ArrowLeft, ChevronRight, Home } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
 
@@ -68,21 +68,33 @@ export function PageHeader({
   description,
   actions,
   titleClassName,
+  backHref,
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
   titleClassName?: string;
+  backHref?: string;
 }) {
   return (
     <div className="animate-fade-in-up mb-8">
       <Breadcrumbs />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <div>
-          <h1 className={cn("text-3xl font-bold tracking-tight", titleClassName)}>{title}</h1>
-          {description && (
-            <p className="text-muted-foreground text-sm mt-1">{description}</p>
+        <div className="flex items-center gap-3">
+          {backHref && (
+            <Link
+              to={backHref}
+              className="shrink-0 rounded-md p-1.5 -ml-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
           )}
+          <div>
+            <h1 className={cn("text-3xl font-bold tracking-tight", titleClassName)}>{title}</h1>
+            {description && (
+              <p className="text-muted-foreground text-sm mt-1">{description}</p>
+            )}
+          </div>
         </div>
         {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
       </div>

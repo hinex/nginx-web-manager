@@ -242,6 +242,7 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
       <PageHeader
         title="Edit Host"
         description="Update proxy host configuration"
+        backHref="/admin/hosts"
       />
       <HostForm
         initialData={initialData}

@@ -81,6 +81,7 @@ export default function ChangePasswordPage() {
       <PageHeader
         title="Change Password"
         description="Update your account password"
+        backHref="/admin/security"
       />
     <Card glass className="max-w-md">
       <CardHeader>
