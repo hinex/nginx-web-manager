@@ -594,6 +594,11 @@ function HostRow({
           {domains.length > 3 && (
             <Badge variant="outline">+{domains.length - 3} more</Badge>
           )}
+          {(host as any).draft != null && (
+            <Badge variant="outline" className="text-orange-600 border-orange-300">
+              Modified
+            </Badge>
+          )}
         </div>
       </TableCell>
 

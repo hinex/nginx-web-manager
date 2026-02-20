@@ -240,7 +240,7 @@ export default function NewHost({ loaderData }: Route.ComponentProps) {
         groups={groups}
         labels={labels}
         accessLists={allAccessLists}
-        submitLabel="Create Host"
+        submitLabel="Publish"
       />
     </div>
   );
