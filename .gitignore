@@ -30,3 +30,6 @@ Thumbs.db
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# E2E test data
+web/e2e/.test-data/

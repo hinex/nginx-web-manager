@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fake nginx for e2e tests — always succeeds
+exit 0
