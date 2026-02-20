@@ -13,13 +13,12 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: "html",
-  globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: "http://localhost:5173",
     trace: "on-first-retry",
   },
   webServer: {
-    command: "bun run dev",
+    command: "sh e2e/start-server.sh",
     url: "http://localhost:5173",
     reuseExistingServer: !process.env.CI,
     env: {
