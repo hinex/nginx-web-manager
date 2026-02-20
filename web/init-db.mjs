@@ -94,6 +94,8 @@ const defaultSettings = [
   { key: "watchdog_interval_ms", value: "30000" },
   { key: "audit_retention_days", value: "90" },
   { key: "health_retention_days", value: "30" },
+  { key: "dns_resolver", value: "" },
+  { key: "dns_resolver_valid", value: "30s" },
 ];
 
 for (const s of defaultSettings) {

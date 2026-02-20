@@ -28,6 +28,8 @@ const SETTING_KEYS = [
   "max_login_attempts",
   "login_ban_duration_minutes",
   "config_version_retention_days",
+  "dns_resolver",
+  "dns_resolver_valid",
 ] as const;
 
 export function meta() {
@@ -230,6 +232,39 @@ export default function SettingsPage({ loaderData }: Route.ComponentProps) {
               />
               <p className="text-xs text-muted-foreground mt-1">
                 Config versions older than this are pruned (default: 30).
+              </p>
+            </div>
+
+            <Separator />
+
+            <div>
+              <Label htmlFor="dns_resolver">DNS Resolver</Label>
+              <Input
+                id="dns_resolver"
+                name="dns_resolver"
+                type="text"
+                defaultValue={currentSettings.dns_resolver ?? ""}
+                placeholder="127.0.0.11"
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Resolver IP for dynamic DNS in proxy locations with a single upstream.
+                Use 127.0.0.11 for Docker. Leave empty to disable.
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="dns_resolver_valid">Resolver TTL</Label>
+              <Input
+                id="dns_resolver_valid"
+                name="dns_resolver_valid"
+                type="text"
+                defaultValue={currentSettings.dns_resolver_valid ?? "30s"}
+                placeholder="30s"
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                How long resolved addresses are cached (default: 30s).
               </p>
             </div>
 
