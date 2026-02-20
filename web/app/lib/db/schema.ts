@@ -95,6 +95,9 @@ export const hosts = sqliteTable("hosts", {
   basicAuth: text("basic_auth", { mode: "json" })
     .$type<{ enabled: boolean; users: Array<{ username: string; password: string }> } | null>()
     .default(null),
+  draft: text("draft", { mode: "json" })
+    .$type<Record<string, unknown> | null>()
+    .default(null),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),

@@ -72,6 +72,24 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { labelId: result.id, labelName: result.name, labelColor: result.color };
   }
 
+  // Handle discard draft
+  if (intent === "discardDraft") {
+    db.update(hosts)
+      .set({ draft: null, updatedAt: new Date() })
+      .where(eq(hosts.id, id))
+      .run();
+    const user = await getSessionUser(request);
+    logAudit({
+      userId: user?.userId ?? null,
+      action: "update",
+      entity: "host",
+      entityId: id,
+      details: { discardDraft: true },
+      ipAddress: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown",
+    });
+    return { discarded: true };
+  }
+
   let data: HostFormData;
   try {
     data = JSON.parse(formData.get("formData") as string);
@@ -79,66 +97,71 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { error: "Invalid form data" };
   }
 
-  // Validation
-  const hasHttpLocations = data.locations.length > 0;
-  if (hasHttpLocations && (!data.domains || data.domains.length === 0)) {
-    return { error: "At least one domain is required for HTTP locations" };
-  }
+  const saveIntent = intent as string;
+  const isDraft = saveIntent === "saveDraft";
 
-  if (data.locations.length === 0 && data.streamPorts.length === 0) {
-    return { error: "At least one location or stream port is required" };
-  }
-
-  // Validate no duplicate location paths
-  const locationKeys = data.locations.map((l) => {
-    const prefix = l.matchType === "exact" ? "= " : l.matchType === "regex" ? "~ " : "";
-    return `${prefix}${l.path}`;
-  });
-  const seen = new Set<string>();
-  for (const key of locationKeys) {
-    if (seen.has(key)) {
-      return { error: `Duplicate location "${key}". Each location path + match type must be unique.` };
+  // Only validate for publish
+  if (!isDraft) {
+    const hasHttpLocations = data.locations.length > 0;
+    if (hasHttpLocations && (!data.domains || data.domains.length === 0)) {
+      return { error: "At least one domain is required for HTTP locations" };
     }
-    seen.add(key);
-  }
 
-  for (const loc of data.locations) {
-    if (loc.type === "proxy") {
-      if (!loc.upstreams || loc.upstreams.length === 0) {
-        return { error: `Proxy location "${loc.path}" needs at least one upstream` };
+    if (data.locations.length === 0 && data.streamPorts.length === 0) {
+      return { error: "At least one location or stream port is required" };
+    }
+
+    // Validate no duplicate location paths
+    const locationKeys = data.locations.map((l) => {
+      const prefix = l.matchType === "exact" ? "= " : l.matchType === "regex" ? "~ " : "";
+      return `${prefix}${l.path}`;
+    });
+    const seen = new Set<string>();
+    for (const key of locationKeys) {
+      if (seen.has(key)) {
+        return { error: `Duplicate location "${key}". Each location path + match type must be unique.` };
       }
-      for (const u of loc.upstreams) {
-        if (!u.server?.trim()) return { error: "All upstreams must have a server address" };
-        if (!u.port || u.port < 1 || u.port > 65535) return { error: "Upstream port must be 1-65535" };
-      }
-      // Validate all upstreams in a location use the same protocol
-      const protocols = new Set(loc.upstreams.map((u: any) => u.protocol || "http"));
-      if (protocols.size > 1) {
-        return { error: `Proxy location "${loc.path}" has mixed upstream protocols. All upstreams in a location must use the same protocol.` };
-      }
+      seen.add(key);
     }
-    if (loc.type === "static") {
-      if (!loc.staticDir?.trim()) return { error: `Static location "${loc.path}" needs a directory path` };
-    }
-    if (loc.type === "redirect") {
-      if (!loc.forwardDomain?.trim()) return { error: `Redirect location "${loc.path}" needs a forward domain` };
-    }
-    if (loc.type === "file") {
-      if (!loc.staticDir?.trim()) return { error: `File location "${loc.path}" needs a file path` };
-    }
-  }
 
-  for (const sp of data.streamPorts) {
-    if (!sp.port || sp.port < 1 || sp.port > 65535) {
-      return { error: "Stream port must be 1-65535" };
+    for (const loc of data.locations) {
+      if (loc.type === "proxy") {
+        if (!loc.upstreams || loc.upstreams.length === 0) {
+          return { error: `Proxy location "${loc.path}" needs at least one upstream` };
+        }
+        for (const u of loc.upstreams) {
+          if (!u.server?.trim()) return { error: "All upstreams must have a server address" };
+          if (!u.port || u.port < 1 || u.port > 65535) return { error: "Upstream port must be 1-65535" };
+        }
+        // Validate all upstreams in a location use the same protocol
+        const protocols = new Set(loc.upstreams.map((u: any) => u.protocol || "http"));
+        if (protocols.size > 1) {
+          return { error: `Proxy location "${loc.path}" has mixed upstream protocols. All upstreams in a location must use the same protocol.` };
+        }
+      }
+      if (loc.type === "static") {
+        if (!loc.staticDir?.trim()) return { error: `Static location "${loc.path}" needs a directory path` };
+      }
+      if (loc.type === "redirect") {
+        if (!loc.forwardDomain?.trim()) return { error: `Redirect location "${loc.path}" needs a forward domain` };
+      }
+      if (loc.type === "file") {
+        if (!loc.staticDir?.trim()) return { error: `File location "${loc.path}" needs a file path` };
+      }
     }
-    if (!sp.upstreams || sp.upstreams.length === 0) {
-      return { error: `Stream port ${sp.port} needs at least one upstream` };
-    }
-  }
 
-  if (data.sslType === "custom" && (!data.sslCertPath || !data.sslKeyPath)) {
-    return { error: "Custom SSL requires both certificate and key paths" };
+    for (const sp of data.streamPorts) {
+      if (!sp.port || sp.port < 1 || sp.port > 65535) {
+        return { error: "Stream port must be 1-65535" };
+      }
+      if (!sp.upstreams || sp.upstreams.length === 0) {
+        return { error: `Stream port ${sp.port} needs at least one upstream` };
+      }
+    }
+
+    if (data.sslType === "custom" && (!data.sslCertPath || !data.sslKeyPath)) {
+      return { error: "Custom SSL requires both certificate and key paths" };
+    }
   }
 
   // Load existing host for password preservation
@@ -147,6 +170,40 @@ export async function action({ request, params }: Route.ActionArgs) {
   const existingLocations = (existingHost?.locations as any[]) ?? [];
   const hashed = await hashBasicAuthPasswords(data.basicAuth, data.locations, existingBasicAuth, existingLocations);
 
+  if (isDraft) {
+    // Draft save — store full data in draft column only
+    db.update(hosts)
+      .set({
+        draft: { ...data, basicAuth: hashed.basicAuth, locations: hashed.locations } as any,
+        updatedAt: new Date(),
+      })
+      .where(eq(hosts.id, id))
+      .run();
+
+    // Sync label assignments
+    db.delete(hostLabelAssignments)
+      .where(eq(hostLabelAssignments.hostId, id))
+      .run();
+    if (data.labelIds?.length > 0) {
+      for (const labelId of data.labelIds) {
+        db.insert(hostLabelAssignments).values({ hostId: id, labelId }).run();
+      }
+    }
+
+    const user = await getSessionUser(request);
+    logAudit({
+      userId: user?.userId ?? null,
+      action: "update",
+      entity: "host",
+      entityId: id,
+      details: { domains: data.domains, draft: true },
+      ipAddress: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown",
+    });
+
+    return { drafted: true };
+  }
+
+  // Publish flow — update main fields, clear draft
   db.update(hosts)
     .set({
       domains: data.domains,
@@ -166,6 +223,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       webhookUrl: data.webhookUrl || undefined,
       advancedNginx: data.advancedNginx || undefined,
       clientMaxBodySize: data.clientMaxBodySize || undefined,
+      draft: null,
       updatedAt: new Date(),
     })
     .where(eq(hosts.id, id))
@@ -208,7 +266,10 @@ export async function action({ request, params }: Route.ActionArgs) {
 export default function EditHost({ loaderData }: Route.ComponentProps) {
   const { host, groups, labels, accessLists: allAccessLists, assignedLabelIds } = loaderData;
 
-  const initialData: Partial<HostFormData> = {
+  const hasDraft = (host as any).draft != null;
+  const draftData = (host as any).draft as Record<string, any> | null;
+
+  const publishedData: Partial<HostFormData> = {
     domains: host.domains as string[],
     groupId: host.groupId,
     enabled: host.enabled,
@@ -227,7 +288,7 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
           ...(host as any).basicAuth,
           users: ((host as any).basicAuth.users ?? []).map((u: any) => ({
             username: u.username,
-            password: "", // don't expose hash to client
+            password: "",
           })),
         }
       : null,
@@ -237,6 +298,20 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
     clientMaxBodySize: host.clientMaxBodySize || "",
   };
 
+  const draftInitialData: Partial<HostFormData> | null = draftData ? {
+    ...draftData,
+    labelIds: draftData.labelIds ?? assignedLabelIds,
+    basicAuth: draftData.basicAuth
+      ? {
+          ...draftData.basicAuth,
+          users: (draftData.basicAuth.users ?? []).map((u: any) => ({
+            username: u.username,
+            password: "",
+          })),
+        }
+      : null,
+  } as Partial<HostFormData> : null;
+
   return (
     <div>
       <PageHeader
@@ -245,11 +320,13 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
         backHref="/admin/hosts"
       />
       <HostForm
-        initialData={initialData}
+        initialData={hasDraft ? draftInitialData! : publishedData}
+        publishedData={publishedData}
+        hasDraft={hasDraft}
         groups={groups}
         labels={labels}
         accessLists={allAccessLists}
-        submitLabel="Update Host"
+        submitLabel="Publish"
       />
     </div>
   );

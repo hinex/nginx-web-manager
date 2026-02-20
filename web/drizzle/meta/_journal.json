@@ -57,6 +57,13 @@
       "when": 1771500300000,
       "tag": "0012_host_basic_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1771500400000,
+      "tag": "0013_host_draft",
+      "breakpoints": true
     }
   ]
 }
