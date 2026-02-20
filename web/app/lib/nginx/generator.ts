@@ -41,10 +41,13 @@ export function generateAllConfigs() {
   // Load access lists for server block generation
   const accessListMap = loadAccessLists();
 
+  const dnsResolver = db.select().from(settings).where(eq(settings.key, "dns_resolver")).get()?.value || "";
+  const dnsResolverValid = db.select().from(settings).where(eq(settings.key, "dns_resolver_valid")).get()?.value || "30s";
+
   const allHosts = db.select().from(hosts).all();
   for (const host of allHosts) {
     if (!host.enabled) continue;
-    generateHostConfig(host, accessListMap);
+    generateHostConfig(host, accessListMap, dnsResolver, dnsResolverValid);
   }
 }
 
@@ -53,9 +56,11 @@ export function generateAllConfigs() {
  */
 function generateHostConfig(
   host: typeof hosts.$inferSelect,
-  accessListMap: Map<number, AccessListWithRules>
+  accessListMap: Map<number, AccessListWithRules>,
+  dnsResolver: string,
+  dnsResolverValid: string
 ) {
-  const hostConfig = mapHostToConfig(host);
+  const hostConfig = mapHostToConfig(host, dnsResolver, dnsResolverValid);
 
   // HTTP server block
   if (hostConfig.domains.length > 0 && (hostConfig.locations ?? []).length > 0) {
@@ -276,7 +281,7 @@ function generateHostAuthFiles() {
 
 // ─── Helpers ─────────────────────────────────────────────
 
-function mapHostToConfig(host: typeof hosts.$inferSelect): HostConfig {
+function mapHostToConfig(host: typeof hosts.$inferSelect, dnsResolver: string, dnsResolverValid: string): HostConfig {
   // Determine error pages directory
   let errorPagesDir: string | null = null;
   const hostErrorDir = `/data/error-pages/host-${host.id}`;
@@ -328,6 +333,8 @@ function mapHostToConfig(host: typeof hosts.$inferSelect): HostConfig {
     webhookUrl: host.webhookUrl,
     errorPagesDir,
     basicAuth: (host as any).basicAuth ?? null,
+    dnsResolver: dnsResolver || null,
+    dnsResolverValid: dnsResolverValid || null,
   };
 }
 

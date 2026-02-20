@@ -37,6 +37,8 @@ export interface HostConfig {
   webhookUrl: string | null;
   errorPagesDir: string | null;
   basicAuth?: { enabled: boolean; users: Array<{ username: string; password: string }> } | null;
+  dnsResolver?: string | null;
+  dnsResolverValid?: string | null;
 }
 
 /**
@@ -54,19 +56,20 @@ export function buildServerBlock(
   const primaryDomain = host.domains[0];
 
   // ── Upstream blocks for proxy locations ──
-  const proxyLocations = (host.locations ?? []).filter(
-    (l) => l.type === "proxy" && l.upstreams && l.upstreams.length > 0
-  );
   for (let i = 0; i < (host.locations ?? []).length; i++) {
     const loc = host.locations[i];
     if (loc.type === "proxy" && loc.upstreams && loc.upstreams.length > 0) {
-      const upstreamName = `host_${host.id}_loc_${i}`;
-      const block = buildUpstreamBlock(
-        upstreamName,
-        loc.upstreams,
-        loc.balanceMethod
-      );
-      if (block) parts.push(block);
+      // Skip upstream block for single-upstream when resolver is configured
+      const useVariable = host.dnsResolver && loc.upstreams.length === 1;
+      if (!useVariable) {
+        const upstreamName = `host_${host.id}_loc_${i}`;
+        const block = buildUpstreamBlock(
+          upstreamName,
+          loc.upstreams,
+          loc.balanceMethod
+        );
+        if (block) parts.push(block);
+      }
     }
   }
 
@@ -219,46 +222,65 @@ export function buildServerBlock(
         if (loc.upstreams && loc.upstreams.length > 0) {
           const upstreamName = `host_${host.id}_loc_${i}`;
           const protocol = loc.upstreams[0]?.protocol || "http";
+          const useVariable = host.dnsResolver && loc.upstreams.length === 1;
 
-          switch (protocol) {
-            case "grpc":
-              serverLines.push(`        grpc_pass grpc://${upstreamName};`);
-              break;
-            case "grpcs":
-              serverLines.push(`        grpc_pass grpcs://${upstreamName};`);
-              break;
-            case "fastcgi": {
-              serverLines.push(`        fastcgi_pass ${upstreamName};`);
-              serverLines.push("        include fastcgi_params;");
-              serverLines.push("        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;");
-              break;
+          if (useVariable) {
+            // Dynamic DNS: resolver + variable-based proxy_pass
+            const u = loc.upstreams[0];
+            const resolverValid = host.dnsResolverValid || "30s";
+            serverLines.push(`        resolver ${host.dnsResolver} valid=${resolverValid};`);
+            serverLines.push(`        set $backend_${upstreamName} "${protocol}://${u.server}:${u.port}";`);
+
+            switch (protocol) {
+              case "grpc":
+                serverLines.push(`        grpc_pass grpc://${u.server}:${u.port};`);
+                break;
+              case "grpcs":
+                serverLines.push(`        grpc_pass grpcs://${u.server}:${u.port};`);
+                break;
+              case "fastcgi":
+                serverLines.push(`        fastcgi_pass ${u.server}:${u.port};`);
+                serverLines.push("        include fastcgi_params;");
+                serverLines.push("        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;");
+                break;
+              case "http":
+              case "https":
+              default:
+                serverLines.push(`        proxy_pass $backend_${upstreamName};`);
+                break;
             }
-            case "http":
-            case "https":
-            default:
-              serverLines.push(`        proxy_pass ${protocol}://${upstreamName};`);
-              break;
+          } else {
+            // Static upstream block (multi-upstream or no resolver)
+            switch (protocol) {
+              case "grpc":
+                serverLines.push(`        grpc_pass grpc://${upstreamName};`);
+                break;
+              case "grpcs":
+                serverLines.push(`        grpc_pass grpcs://${upstreamName};`);
+                break;
+              case "fastcgi": {
+                serverLines.push(`        fastcgi_pass ${upstreamName};`);
+                serverLines.push("        include fastcgi_params;");
+                serverLines.push("        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;");
+                break;
+              }
+              case "http":
+              case "https":
+              default:
+                serverLines.push(`        proxy_pass ${protocol}://${upstreamName};`);
+                break;
+            }
           }
 
-          // Headers differ by protocol
+          // Headers differ by protocol (unchanged)
           if (protocol !== "grpc" && protocol !== "grpcs" && protocol !== "fastcgi") {
             serverLines.push("        proxy_set_header Host $host;");
-            serverLines.push(
-              "        proxy_set_header X-Real-IP $remote_addr;"
-            );
-            serverLines.push(
-              "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
-            );
-            serverLines.push(
-              "        proxy_set_header X-Forwarded-Proto $scheme;"
-            );
+            serverLines.push("        proxy_set_header X-Real-IP $remote_addr;");
+            serverLines.push("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;");
+            serverLines.push("        proxy_set_header X-Forwarded-Proto $scheme;");
             serverLines.push("        proxy_http_version 1.1;");
-            serverLines.push(
-              '        proxy_set_header Upgrade $http_upgrade;'
-            );
-            serverLines.push(
-              '        proxy_set_header Connection "upgrade";'
-            );
+            serverLines.push('        proxy_set_header Upgrade $http_upgrade;');
+            serverLines.push('        proxy_set_header Connection "upgrade";');
           }
         }
         break;
