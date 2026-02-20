@@ -14,8 +14,8 @@ import { buildServerBlock, type HostConfig } from "./templates/server-block";
 import { buildStreamBlock } from "./templates/stream";
 import { buildHtpasswdContent, type AccessListWithRules } from "./templates/access";
 
-const NGINX_CONF_DIR = "/etc/nginx";
-const DATA_NGINX_DIR = "/data/nginx";
+const NGINX_CONF_DIR = process.env.NGINX_CONF_DIR || "/etc/nginx";
+const DATA_NGINX_DIR = process.env.DATA_NGINX_DIR || "/data/nginx";
 const HOST_CONF_DIR = join(DATA_NGINX_DIR, "conf.d");
 const STREAM_CONF_DIR = join(DATA_NGINX_DIR, "stream.d");
 const AUTH_DIR = join(DATA_NGINX_DIR, "auth");
