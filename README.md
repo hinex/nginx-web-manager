@@ -272,6 +272,18 @@ bun test             # Run tests
 docker build -t hinex/nginx-web-manager .
 ```
 
+### Releasing a New Version
+
+```bash
+./update_version.sh 0.1.0
+git add web/package.json
+git commit -m "chore: bump version to v0.1.0"
+git tag v0.1.0
+git push origin main --tags
+```
+
+The script updates `web/package.json` and validates the semver format.
+
 ## Tech Stack
 
 ### Web Admin
