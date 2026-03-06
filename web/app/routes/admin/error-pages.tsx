@@ -20,7 +20,7 @@ import { Textarea } from "~/components/ui/textarea";
 import { toast } from "sonner";
 
 const ERROR_PAGES_DIR = "/data/error-pages";
-const ERROR_CODES = ["404", "500", "502", "503"];
+const ERROR_CODES = ["404", "500", "502", "503", "504"];
 
 export function meta() {
   return [{ title: "Error Pages — Nginx Manager" }];

@@ -204,12 +204,30 @@ server {
  * Generate default server block (catch-all for unconfigured domains).
  */
 function generateDefaultServerConfig() {
+  const globalErrorDir = "/data/error-pages/global";
+  const hasErrorPages = existsSync(globalErrorDir);
+
+  const errorBlock = hasErrorPages
+    ? `
+    error_page 404 /_errors/404.html;
+    error_page 500 /_errors/500.html;
+    error_page 502 /_errors/502.html;
+    error_page 503 /_errors/503.html;
+    error_page 504 /_errors/504.html;
+
+    location /_errors/ {
+        alias ${globalErrorDir}/;
+        internal;
+    }
+`
+    : "";
+
   const config = `# Default server — catch-all for unconfigured domains.
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-
+${errorBlock}
     location / {
         root /data/default-page;
         index index.html;

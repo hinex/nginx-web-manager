@@ -167,16 +167,14 @@ export function buildServerBlock(
 
   // Error pages
   if (host.errorPagesDir) {
-    serverLines.push(`    error_page 404 /custom_404.html;`);
-    serverLines.push(`    error_page 500 502 503 504 /custom_50x.html;`);
+    serverLines.push("    error_page 404 /_errors/404.html;");
+    serverLines.push("    error_page 500 /_errors/500.html;");
+    serverLines.push("    error_page 502 /_errors/502.html;");
+    serverLines.push("    error_page 503 /_errors/503.html;");
+    serverLines.push("    error_page 504 /_errors/504.html;");
     serverLines.push("");
-    serverLines.push("    location = /custom_404.html {");
-    serverLines.push(`        root ${host.errorPagesDir};`);
-    serverLines.push("        internal;");
-    serverLines.push("    }");
-    serverLines.push("");
-    serverLines.push("    location = /custom_50x.html {");
-    serverLines.push(`        root ${host.errorPagesDir};`);
+    serverLines.push("    location /_errors/ {");
+    serverLines.push(`        alias ${host.errorPagesDir}/;`);
     serverLines.push("        internal;");
     serverLines.push("    }");
     serverLines.push("");
