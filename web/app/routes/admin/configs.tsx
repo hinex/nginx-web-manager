@@ -347,10 +347,12 @@ export default function ConfigsPage() {
                 <Tabs value={editorMode} onValueChange={(v) => setEditorMode(v as "code" | "block")}>
                   <TabsList className="h-8">
                     <TabsTrigger value="code" className="text-xs gap-1 px-2">
-                      <Code className="h-3.5 w-3.5" /> Code
+                      <Code className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Code</span>
                     </TabsTrigger>
                     <TabsTrigger value="block" className="text-xs gap-1 px-2">
-                      <Blocks className="h-3.5 w-3.5" /> Blocks
+                      <Blocks className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Blocks</span>
                     </TabsTrigger>
                   </TabsList>
                 </Tabs>
@@ -359,7 +361,8 @@ export default function ConfigsPage() {
                   variant={historyOpen ? "default" : "outline"}
                   onClick={toggleHistory}
                 >
-                  <History className="h-3.5 w-3.5 mr-1" /> History
+                  <History className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">History</span>
                 </Button>
                 <Button
                   size="sm"
@@ -367,7 +370,8 @@ export default function ConfigsPage() {
                   onClick={handleSave}
                   disabled={!dirty}
                 >
-                  <Save className="h-3.5 w-3.5 mr-1" /> Save
+                  <Save className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">Save</span>
                 </Button>
               </div>
             </div>

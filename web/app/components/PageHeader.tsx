@@ -77,26 +77,30 @@ export function PageHeader({
   backHref?: string;
 }) {
   return (
-    <div className="animate-fade-in-up mb-8">
+    <div className="animate-fade-in-up mb-6 md:mb-8">
       <Breadcrumbs />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           {backHref && (
             <Link
               to={backHref}
-              className="shrink-0 rounded-md p-1.5 -ml-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="shrink-0 rounded-md p-2 -ml-2 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               <ArrowLeft className="h-5 w-5" />
             </Link>
           )}
-          <div>
-            <h1 className={cn("text-3xl font-bold tracking-tight", titleClassName)}>{title}</h1>
+          <div className="min-w-0">
+            <h1 className={cn("text-2xl md:text-3xl font-bold tracking-tight truncate", titleClassName)}>{title}</h1>
             {description && (
               <p className="text-muted-foreground text-sm mt-1">{description}</p>
             )}
           </div>
         </div>
-        {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+        {actions && (
+          <div className="flex flex-wrap items-center gap-2 shrink-0 [&>a]:flex-1 [&>button]:flex-1 sm:[&>a]:flex-none sm:[&>button]:flex-none">
+            {actions}
+          </div>
+        )}
       </div>
     </div>
   );

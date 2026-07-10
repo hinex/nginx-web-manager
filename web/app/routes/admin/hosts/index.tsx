@@ -24,6 +24,7 @@ import {
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
 import { Input } from "~/components/ui/input";
+import { Switch } from "~/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -332,8 +333,8 @@ export default function HostsIndex({ loaderData }: Route.ComponentProps) {
       />
 
       {/* ── Toolbar ────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-md">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative w-full sm:flex-1 sm:min-w-[200px] sm:max-w-md">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             value={search}
@@ -343,38 +344,40 @@ export default function HostsIndex({ loaderData }: Route.ComponentProps) {
           />
         </div>
 
-        <div className="flex-1" />
+        <div className="hidden sm:block sm:flex-1" />
 
-        <div className="flex rounded-md border">
-          <Button
-            variant={viewMode === "groups" ? "default" : "ghost"}
-            size="sm"
-            className="rounded-r-none"
-            onClick={() => setViewMode("groups")}
-          >
-            <FolderOpen className="mr-1.5 h-4 w-4" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-md border">
+            <Button
+              variant={viewMode === "groups" ? "default" : "ghost"}
+              size="sm"
+              className="rounded-r-none"
+              onClick={() => setViewMode("groups")}
+            >
+              <FolderOpen className="mr-1.5 h-4 w-4" />
+              Groups
+            </Button>
+            <Button
+              variant={viewMode === "all" ? "default" : "ghost"}
+              size="sm"
+              className="rounded-l-none"
+              onClick={() => setViewMode("all")}
+            >
+              <List className="mr-1.5 h-4 w-4" />
+              All
+            </Button>
+          </div>
+
+          <Button variant="outline" size="sm" onClick={() => setGroupsModalOpen(true)}>
+            <Settings2 className="mr-1.5 h-4 w-4" />
             Groups
           </Button>
-          <Button
-            variant={viewMode === "all" ? "default" : "ghost"}
-            size="sm"
-            className="rounded-l-none"
-            onClick={() => setViewMode("all")}
-          >
-            <List className="mr-1.5 h-4 w-4" />
-            All
+
+          <Button variant="outline" size="sm" onClick={() => setLabelsModalOpen(true)}>
+            <Tags className="mr-1.5 h-4 w-4" />
+            Labels
           </Button>
         </div>
-
-        <Button variant="outline" size="sm" onClick={() => setGroupsModalOpen(true)}>
-          <Settings2 className="mr-1.5 h-4 w-4" />
-          Manage Groups
-        </Button>
-
-        <Button variant="outline" size="sm" onClick={() => setLabelsModalOpen(true)}>
-          <Tags className="mr-1.5 h-4 w-4" />
-          Manage Labels
-        </Button>
       </div>
 
       {/* ── Content ───────────────────────────────────────────── */}
@@ -421,26 +424,36 @@ function AllHostsTable({
   groupMap: Map<number, GroupItem>;
 }) {
   return (
-    <div className="rounded-md border overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Type</TableHead>
-            <TableHead>Domains</TableHead>
-            <TableHead className="hidden lg:table-cell">Labels</TableHead>
-            <TableHead className="hidden sm:table-cell">Info</TableHead>
-            <TableHead>SSL</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="w-[70px]">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {hostsList.map((host) => (
-            <HostRow key={host.id} host={host} groupMap={groupMap} />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+    <>
+      {/* Mobile: cards */}
+      <div className="space-y-3 md:hidden">
+        {hostsList.map((host) => (
+          <HostCard key={host.id} host={host} />
+        ))}
+      </div>
+
+      {/* Desktop: table */}
+      <div className="hidden md:block rounded-md border overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Type</TableHead>
+              <TableHead>Domains</TableHead>
+              <TableHead className="hidden lg:table-cell">Labels</TableHead>
+              <TableHead className="hidden sm:table-cell">Info</TableHead>
+              <TableHead>SSL</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-[70px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {hostsList.map((host) => (
+              <HostRow key={host.id} host={host} groupMap={groupMap} />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 }
 
@@ -502,7 +515,15 @@ function GroupedHostsView({
               {section.hosts.length}
             </Badge>
           </div>
-          <div className="rounded-md border overflow-x-auto">
+          {/* Mobile: cards */}
+          <div className="space-y-3 md:hidden">
+            {section.hosts.map((host) => (
+              <HostCard key={host.id} host={host} />
+            ))}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -528,20 +549,12 @@ function GroupedHostsView({
   );
 }
 
-// ─── Host Row ───────────────────────────────────────────────
+// ─── Host Actions (shared between row and card) ─────────────
 
-function HostRow({
-  host,
-  groupMap,
-}: {
-  host: HostWithLabels;
-  groupMap: Map<number, GroupItem>;
-}) {
+function HostActions({ host }: { host: HostWithLabels }) {
   const toggleFetcher = useFetcher();
   const deleteFetcher = useFetcher();
   const [alertOpen, setAlertOpen] = useState(false);
-
-  const domains = host.domains as string[];
 
   const handleToggle = () => {
     toggleFetcher.submit(
@@ -557,6 +570,155 @@ function HostRow({
     );
     setAlertOpen(false);
   };
+
+  return (
+    <AlertDialog open={alertOpen} onOpenChange={setAlertOpen}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-9 w-9 md:h-8 md:w-8">
+            <MoreHorizontal className="h-4 w-4" />
+            <span className="sr-only">Open menu</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem asChild>
+            <Link to={`/admin/hosts/${host.id}/edit`}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={handleToggle}
+            disabled={toggleFetcher.state !== "idle"}
+          >
+            <Power className="mr-2 h-4 w-4" />
+            {host.enabled ? "Disable" : "Enable"}
+          </DropdownMenuItem>
+          <AlertDialogTrigger asChild>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              disabled={deleteFetcher.state !== "idle"}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </DropdownMenuItem>
+          </AlertDialogTrigger>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete this host? This action cannot be
+            undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleDelete}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+// ─── Host Card (mobile) ─────────────────────────────────────
+
+function HostCard({ host }: { host: HostWithLabels }) {
+  const toggleFetcher = useFetcher();
+  const domains = host.domains as string[];
+  const typeBadge = getHostTypeBadge(host);
+  const typeInfo = getHostInfo(host);
+
+  const sslLabel =
+    host.sslType === "letsencrypt"
+      ? "Let's Encrypt"
+      : host.sslType === "custom"
+        ? "Custom SSL"
+        : "No SSL";
+
+  // Optimistic toggle state
+  const pendingEnabled = toggleFetcher.formData
+    ? !host.enabled
+    : host.enabled;
+
+  return (
+    <div
+      className={`rounded-lg border bg-card p-4 space-y-3 transition-opacity ${
+        pendingEnabled ? "" : "opacity-60"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <Link
+          to={`/admin/hosts/${host.id}/edit`}
+          className="flex flex-wrap gap-1 min-w-0 flex-1"
+        >
+          {domains.slice(0, 3).map((d, i) => (
+            <Badge key={i} variant="secondary" className="max-w-full truncate">
+              {d}
+            </Badge>
+          ))}
+          {domains.length > 3 && (
+            <Badge variant="outline">+{domains.length - 3}</Badge>
+          )}
+          {(host as any).draft != null && (
+            <Badge variant="outline" className="text-orange-600 border-orange-300">
+              Modified
+            </Badge>
+          )}
+        </Link>
+        <HostActions host={host} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {typeBadge}
+        <Badge variant="outline">{sslLabel}</Badge>
+        {host.hostLabels.map((label) => (
+          <span
+            key={label.id}
+            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getLabelColorClass(label.color)}`}
+          >
+            {label.name}
+          </span>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm text-muted-foreground truncate">{typeInfo}</span>
+        <label className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground">
+          {pendingEnabled ? "On" : "Off"}
+          <Switch
+            checked={pendingEnabled}
+            disabled={toggleFetcher.state !== "idle"}
+            onCheckedChange={() =>
+              toggleFetcher.submit(
+                { intent: "toggle", id: String(host.id) },
+                { method: "post" }
+              )
+            }
+            aria-label={pendingEnabled ? "Disable host" : "Enable host"}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ─── Host Row ───────────────────────────────────────────────
+
+function HostRow({
+  host,
+  groupMap,
+}: {
+  host: HostWithLabels;
+  groupMap: Map<number, GroupItem>;
+}) {
+  const domains = host.domains as string[];
 
   // Type badge
   const typeBadge = getHostTypeBadge(host);
@@ -637,58 +799,7 @@ function HostRow({
 
       {/* Actions */}
       <TableCell>
-        <AlertDialog open={alertOpen} onOpenChange={setAlertOpen}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">Open menu</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem asChild>
-                <Link to={`/admin/hosts/${host.id}/edit`}>
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={handleToggle}
-                disabled={toggleFetcher.state !== "idle"}
-              >
-                <Power className="mr-2 h-4 w-4" />
-                {host.enabled ? "Disable" : "Enable"}
-              </DropdownMenuItem>
-              <AlertDialogTrigger asChild>
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
-                  disabled={deleteFetcher.state !== "idle"}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
-              </AlertDialogTrigger>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to delete this host? This action cannot be
-                undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDelete}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <HostActions host={host} />
       </TableCell>
     </TableRow>
   );
