@@ -54,10 +54,49 @@ services:
       - '80:80'     # HTTP
       - '81:81'     # Admin UI
       - '443:443'   # HTTPS
+    environment:
+      # Required in production (min 16 chars each)
+      - JWT_SECRET=change-me-to-a-long-random-string
+      - ENCRYPTION_KEY=change-me-to-another-long-random-string
+      # Optional
+      # - ACME_EMAIL=admin@example.com
+      # - WEBAUTHN_RP_ID=nginx.example.com
     volumes:
       - ./data:/data
       - ./letsencrypt:/etc/letsencrypt
 ```
+
+Generate strong secrets with:
+
+```bash
+openssl rand -base64 32
+```
+
+## Environment Variables
+
+### Required in production
+
+| Variable | Description |
+|----------|-------------|
+| `JWT_SECRET` | Secret for signing session JWT tokens. Min 16 characters. The app refuses to start in production without it. |
+| `ENCRYPTION_KEY` | Key for AES-256-GCM encryption of secrets at rest (cluster API keys, etc.). Min 16 characters. Required in production. **Changing it makes previously encrypted data unreadable.** |
+
+### Optional
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ACME_EMAIL` | — | Email used for Let's Encrypt account registration |
+| `WEBAUTHN_RP_ID` | derived from request host | Relying Party ID (domain) for WebAuthn/passkeys, e.g. `nginx.example.com`. Set it when running behind a proxy or on a fixed domain |
+| `WEBAUTHN_ORIGIN` | `https://$WEBAUTHN_RP_ID` | Expected WebAuthn origin, if it differs from the RP ID |
+| `CLUSTER_API_KEY` | — | API key this node accepts for incoming cluster sync (`/api/cluster-receive`). Required only on cluster follower nodes |
+| `NGINX_MANAGER_HOOK_KEY` | — | Auth key for the ACME DNS-01 webhook endpoint (`/api/acme-dns`) |
+| `DB_PATH` | `/data/db.sqlite` | Path to the SQLite database |
+| `NGINX_DIR` | `/data/nginx` | Directory for user-managed nginx data (custom configs, backups, imports) |
+| `NGINX_CONF_DIR` | `/etc/nginx` | Directory where generated nginx configs are written |
+| `DATA_NGINX_DIR` | `/data/nginx` | Data directory referenced from generated configs |
+| `TERMINAL_WS_PORT` | `3002` | Port of the internal terminal WebSocket server (set by the Docker image) |
+
+Inside the official Docker image `NODE_ENV=production` and `TERMINAL_WS_PORT=3002` are already set — normally you only need to provide `JWT_SECRET` and `ENCRYPTION_KEY`.
 
 ## Architecture
 

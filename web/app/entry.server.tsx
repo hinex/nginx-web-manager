@@ -30,7 +30,7 @@ if (!watchdogStarted) {
 let terminalStarted = false;
 if (!terminalStarted) {
   terminalStarted = true;
-  const terminalPort = Number(process.env.TERMINAL_WS_PORT) || 3001;
+  const terminalPort = Number(process.env.TERMINAL_WS_PORT) || 3002;
   startTerminalServer(terminalPort);
 }
 

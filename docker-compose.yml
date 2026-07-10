@@ -7,6 +7,13 @@ services:
       - '80:80'
       - '81:81'
       - '443:443'
+    environment:
+      # Required in production (min 16 chars each)
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      # Optional
+      # - ACME_EMAIL=admin@example.com
+      # - WEBAUTHN_RP_ID=nginx.example.com
     volumes:
       - ./data:/data
       - ./letsencrypt:/etc/letsencrypt
