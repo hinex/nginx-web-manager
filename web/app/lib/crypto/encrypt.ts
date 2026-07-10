@@ -6,13 +6,17 @@ const AUTH_TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
 const SALT = "nginx-manager-encryption-salt";
 
-/**
- * Derives a 256-bit encryption key from the ENCRYPTION_KEY environment variable.
- * Falls back to a deterministic dev key if the env var is not set.
- */
 function getKey(): Buffer {
-  const secret = process.env.ENCRYPTION_KEY || "dev-fallback-encryption-key-do-not-use-in-production";
-  return scryptSync(secret, SALT, KEY_LENGTH);
+  const secret = process.env.ENCRYPTION_KEY;
+  if (secret && secret.length >= 16) {
+    return scryptSync(secret, SALT, KEY_LENGTH);
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "ENCRYPTION_KEY environment variable must be set to at least 16 characters in production"
+    );
+  }
+  return scryptSync("dev-fallback-encryption-key-do-not-use-in-production", SALT, KEY_LENGTH);
 }
 
 /**

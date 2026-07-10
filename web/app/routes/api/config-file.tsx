@@ -5,6 +5,15 @@ import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { logAudit } from "~/lib/audit/log";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { resolve } from "path";
+
+const NGINX_DIR = resolve(process.env.NGINX_DIR || "/data/nginx");
+
+function isAllowedPath(filePath: unknown): filePath is string {
+  if (typeof filePath !== "string" || !filePath) return false;
+  const p = resolve(filePath);
+  return (p === NGINX_DIR || p.startsWith(NGINX_DIR + "/")) && p.endsWith(".conf");
+}
 
 export async function action({ request }: Route.ActionArgs) {
   const user = await requireEditor(request);
@@ -14,7 +23,10 @@ export async function action({ request }: Route.ActionArgs) {
   switch (act) {
     case "read": {
       const { filePath } = body;
-      if (!filePath || !existsSync(filePath)) {
+      if (!isAllowedPath(filePath)) {
+        return Response.json({ error: "Invalid path" }, { status: 400 });
+      }
+      if (!existsSync(filePath)) {
         return Response.json({ error: "File not found" }, { status: 404 });
       }
       const content = readFileSync(filePath, "utf-8");
@@ -23,10 +35,9 @@ export async function action({ request }: Route.ActionArgs) {
 
     case "write": {
       const { filePath, content, message } = body;
-      if (!filePath || typeof content !== "string") {
+      if (!isAllowedPath(filePath) || typeof content !== "string") {
         return Response.json({ error: "filePath and content required" }, { status: 400 });
       }
-      // Save previous version before overwriting
       if (existsSync(filePath)) {
         const oldContent = readFileSync(filePath, "utf-8");
         saveVersion({
@@ -38,7 +49,6 @@ export async function action({ request }: Route.ActionArgs) {
         });
       }
       writeFileSync(filePath, content);
-      // Validate
       const validation = validateNginxConfig();
       if (!validation.valid) {
         return Response.json({ saved: true, valid: false, error: validation.error });
@@ -55,7 +65,10 @@ export async function action({ request }: Route.ActionArgs) {
 
     case "delete": {
       const { filePath } = body;
-      if (!filePath || !existsSync(filePath)) {
+      if (!isAllowedPath(filePath)) {
+        return Response.json({ error: "Invalid path" }, { status: 400 });
+      }
+      if (!existsSync(filePath)) {
         return Response.json({ error: "File not found" }, { status: 404 });
       }
       const oldContent = readFileSync(filePath, "utf-8");
@@ -82,8 +95,8 @@ export async function action({ request }: Route.ActionArgs) {
 
     case "versions": {
       const { filePath } = body;
-      if (!filePath) {
-        return Response.json({ error: "filePath required" }, { status: 400 });
+      if (!isAllowedPath(filePath)) {
+        return Response.json({ error: "Invalid path" }, { status: 400 });
       }
       const { db: database } = await import("~/lib/db/connection");
       const { users: usersTable } = await import("~/lib/db/schema");
@@ -99,7 +112,6 @@ export async function action({ request }: Route.ActionArgs) {
 
     case "diff": {
       const { versionIdA, versionIdB, filePath } = body;
-      // Diff between two versions, or between a version and current file
       if (versionIdA && versionIdB) {
         const a = getVersion(versionIdA);
         const b = getVersion(versionIdB);
@@ -110,6 +122,9 @@ export async function action({ request }: Route.ActionArgs) {
         return Response.json({ diff });
       }
       if (versionIdA && filePath) {
+        if (!isAllowedPath(filePath)) {
+          return Response.json({ error: "Invalid path" }, { status: 400 });
+        }
         const a = getVersion(versionIdA);
         if (!a || !existsSync(filePath)) {
           return Response.json({ error: "Version or file not found" }, { status: 404 });
@@ -130,7 +145,9 @@ export async function action({ request }: Route.ActionArgs) {
       if (!version) {
         return Response.json({ error: "Version not found" }, { status: 404 });
       }
-      // Save current before restoring
+      if (!isAllowedPath(version.filePath)) {
+        return Response.json({ error: "Invalid path" }, { status: 400 });
+      }
       if (existsSync(version.filePath)) {
         const current = readFileSync(version.filePath, "utf-8");
         saveVersion({

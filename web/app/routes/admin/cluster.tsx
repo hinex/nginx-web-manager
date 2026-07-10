@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { requireAdmin } from "~/lib/auth/middleware";
+import { encrypt } from "~/lib/crypto/encrypt";
 import { syncToNode, syncToAllNodes } from "~/lib/cluster/sync";
 import { listConfigFiles } from "~/lib/nginx/parser";
 import {
@@ -89,7 +90,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       id: n.id,
       name: n.name,
       url: n.url,
-      apiKey: n.apiKey,
       role: n.role,
       status: n.status,
       lastSyncAt: n.lastSyncAt ? n.lastSyncAt.getTime() : null,
@@ -134,7 +134,8 @@ export async function action({ request }: Route.ActionArgs) {
       .values({
         name,
         url,
-        apiKey,
+        // Stored encrypted at rest; decrypted in sync.ts when pushing configs
+        apiKey: encrypt(apiKey),
         role: role as "controller" | "worker",
       })
       .run();
@@ -207,7 +208,6 @@ type NodeData = {
   id: number;
   name: string;
   url: string;
-  apiKey: string;
   role: string;
   status: string;
   lastSyncAt: number | null;

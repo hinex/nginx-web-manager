@@ -1,8 +1,19 @@
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "nginx-manager-default-secret-change-me!!"
-);
+export function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (secret && secret.length >= 16) {
+    return new TextEncoder().encode(secret);
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "JWT_SECRET environment variable must be set to at least 16 characters in production"
+    );
+  }
+  return new TextEncoder().encode("nginx-manager-dev-secret-not-for-production");
+}
+
+const JWT_SECRET = getJwtSecret();
 
 export interface TokenPayload extends JWTPayload {
   userId: number;

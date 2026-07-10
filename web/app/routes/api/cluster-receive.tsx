@@ -1,23 +1,25 @@
-/**
- * Receives config files from the controller node.
- * Auth: X-Cluster-Key header must match the CLUSTER_API_KEY env var.
- */
 import { writeFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
+import { timingSafeEqual } from "crypto";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
 
+function keysMatch(provided: string | null, expected: string | undefined): boolean {
+  if (!provided || !expected) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export async function action({ request }: { request: Request }) {
-  // Only accept POST
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  // Verify cluster API key
   const clusterKey = request.headers.get("x-cluster-key");
   const expectedKey = process.env.CLUSTER_API_KEY;
 
-  if (!expectedKey || clusterKey !== expectedKey) {
+  if (!keysMatch(clusterKey, expectedKey)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -29,7 +31,6 @@ export async function action({ request }: { request: Request }) {
 
   const results = { written: 0, errors: [] as string[] };
 
-  // Write config files
   for (const [path, content] of Object.entries(configs)) {
     try {
       mkdirSync(dirname(path), { recursive: true });
@@ -40,7 +41,6 @@ export async function action({ request }: { request: Request }) {
     }
   }
 
-  // Validate nginx config
   const validation = validateNginxConfig();
   if (!validation.valid) {
     return Response.json(
@@ -53,7 +53,6 @@ export async function action({ request }: { request: Request }) {
     );
   }
 
-  // Reload nginx
   const reloaded = reloadNginx();
 
   return Response.json({

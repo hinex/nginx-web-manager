@@ -1,4 +1,16 @@
 #!/command/with-contenv /bin/sh
 cd /opt/nginx-manager/web
+
+SECRETS_FILE=/data/.secrets.env
+if [ ! -f "$SECRETS_FILE" ]; then
+  umask 077
+  {
+    [ -n "$JWT_SECRET" ] || echo "JWT_SECRET=$(head -c 48 /dev/urandom | base64 | tr -d '\n=+/' )"
+    [ -n "$ENCRYPTION_KEY" ] || echo "ENCRYPTION_KEY=$(head -c 48 /dev/urandom | base64 | tr -d '\n=+/' )"
+  } > "$SECRETS_FILE"
+fi
+. "$SECRETS_FILE"
+export JWT_SECRET ENCRYPTION_KEY
+
 /usr/local/bin/bun run init-db.mjs
 exec /usr/local/bin/bun run start

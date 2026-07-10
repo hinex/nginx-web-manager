@@ -1,7 +1,7 @@
 import type { Route } from "./+types/import-apply";
 import { requireAdmin } from "~/lib/auth/middleware";
 import { writeFileSync, mkdirSync } from "fs";
-import { dirname, join } from "path";
+import { dirname, resolve, sep } from "path";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { logAudit } from "~/lib/audit/log";
@@ -78,10 +78,20 @@ export async function action({ request }: Route.ActionArgs) {
 
   const results = { configsWritten: 0, errors: [] as string[] };
 
-  // Write config files (relative paths are resolved against NGINX_DIR)
+  // Write config files (relative paths are resolved against NGINX_DIR).
+  // Resolved paths are validated to stay inside NGINX_DIR so a malicious
+  // archive entry (e.g. "../../etc/passwd" or an absolute path) cannot
+  // escape the nginx config directory (zip-slip).
+  const nginxRoot = resolve(NGINX_DIR);
   for (const [relPath, content] of Object.entries(backup.configs)) {
     try {
-      const fullPath = join(NGINX_DIR, relPath);
+      const fullPath = resolve(nginxRoot, relPath);
+      if (fullPath !== nginxRoot && !fullPath.startsWith(nginxRoot + sep)) {
+        results.errors.push(
+          `Skipped ${relPath}: path escapes the nginx config directory`
+        );
+        continue;
+      }
       mkdirSync(dirname(fullPath), { recursive: true });
       writeFileSync(fullPath, content as string);
       results.configsWritten++;

@@ -46,3 +46,36 @@ export function verifyTotpCode(secret: string, code: string): boolean {
   const delta = totp.validate({ token: code, window: 1 });
   return delta !== null;
 }
+
+// Tracks the last accepted time-step per user to prevent replay of a
+// just-used TOTP code within its validity window. In-memory: single-process
+// server; a restart only re-opens the current ~30-90s window.
+const lastUsedStep = new Map<number, number>();
+
+/**
+ * Verifies a TOTP code and enforces one-time use: a code matching a time-step
+ * that is <= the last accepted step for this user is rejected (replay).
+ */
+export function verifyTotpCodeOnce(
+  userId: number,
+  secret: string,
+  code: string
+): boolean {
+  const totp = new TOTP({
+    issuer: ISSUER,
+    algorithm: ALGORITHM,
+    digits: DIGITS,
+    period: PERIOD,
+    secret: Secret.fromBase32(secret),
+  });
+
+  const delta = totp.validate({ token: code, window: 1 });
+  if (delta === null) return false;
+
+  const step = Math.floor(Date.now() / (PERIOD * 1000)) + delta;
+  const last = lastUsedStep.get(userId);
+  if (last !== undefined && step <= last) return false;
+
+  lastUsedStep.set(userId, step);
+  return true;
+}

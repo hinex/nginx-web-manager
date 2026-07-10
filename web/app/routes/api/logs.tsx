@@ -1,13 +1,16 @@
 import type { Route } from "./+types/logs";
 import { existsSync, readFileSync } from "fs";
+import { requireAuth } from "~/lib/auth/middleware";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  await requireAuth(request);
+
   const url = new URL(request.url);
   const hostId = url.searchParams.get("hostId");
-  const type = url.searchParams.get("type") || "access";
+  const type = url.searchParams.get("type") === "error" ? "error" : "access";
   const lines = Number(url.searchParams.get("lines")) || 100;
 
-  if (!hostId) {
+  if (!hostId || !/^\d+$/.test(hostId)) {
     return Response.json({ lines: [] });
   }
 

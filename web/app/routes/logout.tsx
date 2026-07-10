@@ -1,6 +1,6 @@
 import { redirect } from "react-router";
 import type { Route } from "./+types/logout";
-import { clearSessionCookie, getSessionUser } from "~/lib/auth/session.server";
+import { clearSessionCookies, getSessionUser } from "~/lib/auth/session.server";
 import { logAudit } from "~/lib/audit/log";
 
 export async function action({ request }: Route.ActionArgs) {
@@ -13,7 +13,9 @@ export async function action({ request }: Route.ActionArgs) {
     ipAddress: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown",
   });
 
-  return redirect("/login", {
-    headers: { "Set-Cookie": clearSessionCookie() },
-  });
+  const headers = new Headers();
+  for (const cookie of clearSessionCookies()) {
+    headers.append("Set-Cookie", cookie);
+  }
+  return redirect("/login", { headers });
 }

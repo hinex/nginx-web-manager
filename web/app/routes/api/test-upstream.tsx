@@ -1,10 +1,13 @@
 import type { Route } from "./+types/test-upstream";
 import { checkUpstream } from "~/lib/watchdog/health-check";
+import { requireEditor } from "~/lib/auth/middleware";
 
 export async function action({ request }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
+
+  await requireEditor(request);
 
   try {
     const body = await request.json();

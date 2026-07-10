@@ -108,10 +108,10 @@ describe("encrypt/decrypt", () => {
   });
 
   it("uses different keys for different ENCRYPTION_KEY values", () => {
-    process.env.ENCRYPTION_KEY = "key-one";
+    process.env.ENCRYPTION_KEY = "key-one-at-least-16-chars";
     const encrypted = encrypt("secret");
 
-    process.env.ENCRYPTION_KEY = "key-two";
+    process.env.ENCRYPTION_KEY = "key-two-at-least-16-chars";
     expect(() => decrypt(encrypted)).toThrow();
   });
 

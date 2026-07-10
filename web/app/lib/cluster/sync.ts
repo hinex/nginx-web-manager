@@ -3,8 +3,22 @@ import { clusterNodes, configSyncTags } from "~/lib/db/schema";
 import { listConfigFiles } from "~/lib/nginx/parser";
 import { readFileSync } from "fs";
 import { eq } from "drizzle-orm";
+import { decrypt } from "~/lib/crypto/encrypt";
 
 const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
+
+/**
+ * Cluster API keys are stored encrypted at rest (AES-256-GCM). Rows created
+ * before encryption was introduced hold the raw key, so fall back to the
+ * stored value if decryption fails.
+ */
+export function resolveNodeApiKey(stored: string): string {
+  try {
+    return decrypt(stored);
+  } catch {
+    return stored; // legacy plaintext row
+  }
+}
 
 export interface SyncResult {
   nodeId: number;
@@ -64,7 +78,7 @@ export async function syncToNode(nodeId: number): Promise<SyncResult> {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Cluster-Key": node.apiKey,
+        "X-Cluster-Key": resolveNodeApiKey(node.apiKey),
       },
       body: JSON.stringify({ configs }),
       signal: AbortSignal.timeout(30000),
