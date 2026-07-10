@@ -24,7 +24,7 @@ export async function action({ request }: Route.ActionArgs) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { theme } = body as { theme?: string };
+  const { theme } = body as { theme?: "light" | "dark" | "system" };
 
   if (!theme || !["light", "dark", "system"].includes(theme)) {
     return Response.json(

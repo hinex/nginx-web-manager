@@ -67,7 +67,6 @@ interface CustomTemplateRow {
   category: string;
   content: string;
   variables: Array<{ name: string; label: string; default: string }> | null;
-  userId: number | null;
   createdAt: Date;
 }
 
@@ -125,7 +124,7 @@ export async function action({ request }: Route.ActionArgs) {
         category: category?.trim() || "custom",
         content: content,
         variables,
-        userId: user?.id ?? null,
+        userId: user?.userId ?? null,
         createdAt: new Date(),
       })
       .run();

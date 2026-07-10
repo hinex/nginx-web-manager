@@ -10,7 +10,9 @@ export function buildStreamBlock(
     protocol: string;
     upstreams: Array<{ server: string; port: number; weight: number }>;
     balanceMethod: string;
-  }>
+  }>,
+  dnsResolver?: string | null,
+  dnsResolverValid?: string | null
 ): string {
   if (streamPorts.length === 0) return "";
 
@@ -21,11 +23,16 @@ export function buildStreamBlock(
     if (sp.upstreams.length === 0) continue;
 
     const upstreamName = `stream_host_${hostId}_port_${i}`;
+    // Dynamic DNS (single upstream + resolver): variable proxy_pass so nginx
+    // re-resolves the hostname at runtime instead of caching the IP at config load.
+    const useVariable = !!dnsResolver && sp.upstreams.length === 1;
 
-    // Upstream block
-    blocks.push(
-      buildUpstreamBlock(upstreamName, sp.upstreams, sp.balanceMethod)
-    );
+    if (!useVariable) {
+      // Upstream block
+      blocks.push(
+        buildUpstreamBlock(upstreamName, sp.upstreams, sp.balanceMethod)
+      );
+    }
 
     // Server block
     const lines: string[] = [];
@@ -39,7 +46,14 @@ export function buildStreamBlock(
       lines.push(`    listen [::]:${sp.port};`);
     }
 
-    lines.push(`    proxy_pass ${upstreamName};`);
+    if (useVariable) {
+      const u = sp.upstreams[0];
+      lines.push(`    resolver ${dnsResolver} valid=${dnsResolverValid || "30s"};`);
+      lines.push(`    set $backend_${upstreamName} "${u.server}:${u.port}";`);
+      lines.push(`    proxy_pass $backend_${upstreamName};`);
+    } else {
+      lines.push(`    proxy_pass ${upstreamName};`);
+    }
     lines.push("}");
 
     blocks.push(lines.join("\n"));

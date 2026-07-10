@@ -8,6 +8,8 @@ Similar to Nginx Proxy Manager, but rebuilt from scratch with a modern tech stac
 
 - **Unified Hosts Management** — Manage proxy, static, redirect, and stream hosts from a single page with type selector, grouped views, color labels, and fuzzy search
 - **HTTP/HTTPS Reverse Proxy** — Domain-based routing with path matching (prefix, exact, regex), and custom headers
+- **Upstream Protocols** — Per-location backend protocol: `http`, `https`, `grpc`, `grpcs`, `fastcgi`
+- **Dynamic DNS Resolution** — Optional nginx `resolver` for upstreams (re-resolves changing IPs, e.g. Docker's `127.0.0.11`)
 - **SSL/TLS** — Let's Encrypt (ACME HTTP-01), custom certificates, force HTTPS, HSTS
 - **Load Balancing** — Round robin, weighted, least connections, IP hash, random
 - **Access Control** — IP allowlist/denylist (CIDR), Basic Auth, per-host or per-location rules with satisfy any/all logic
@@ -18,6 +20,10 @@ Similar to Nginx Proxy Manager, but rebuilt from scratch with a modern tech stac
 - **Health Checks** — Periodic upstream monitoring with webhook notifications
 - **Config Validation** — `nginx -t` validation before every reload, preventing broken configs
 - **Graceful Reload** — `nginx -s reload` for zero-downtime configuration changes
+- **Config Version History** — Every generated config is snapshotted and can be reviewed
+- **Config Templates** — Reusable nginx config templates
+- **Cluster Sync** — Synchronize configuration across multiple nodes
+- **Web Terminal** — In-browser terminal for container debugging
 - **Audit Logging** — Tracks all configuration changes with user, action, and timestamp
 - **Web Admin UI** — Full CRUD management for all resources, built with React and Tailwind CSS
 
@@ -147,6 +153,12 @@ services:
 | **SSL Certificates** | Manage Let's Encrypt and custom certificates |
 | **Access Lists** | IP-based and Basic Auth access control rules |
 | **Error Pages** | Upload custom HTML error pages |
+| **Config Editor** | Review generated nginx configs and version history |
+| **Config Templates** | Manage reusable nginx config templates |
+| **DNS Management** | Configure the DNS resolver for dynamic upstreams |
+| **Cluster** | Synchronize configuration across nodes |
+| **Terminal** | In-browser terminal for container debugging |
+| **Security** | Security-related settings |
 | **Default Page** | Edit the page shown for unconfigured domains |
 | **Logs** | View per-host access and error logs |
 | **Audit Log** | Track configuration changes |
@@ -173,8 +185,9 @@ upstream host_1_loc_0 {
 server {
     listen 80;
     listen [::]:80;
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name example.com www.example.com;
 
     ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
@@ -263,7 +276,7 @@ cd web
 bun install
 bun run dev          # Development server
 bun run build        # Production build
-bun test             # Run tests
+bun run test         # Run tests (vitest)
 ```
 
 ### Building the Docker Image
@@ -275,10 +288,10 @@ docker build -t hinex/nginx-web-manager .
 ### Releasing a New Version
 
 ```bash
-./update_version.sh 0.1.0
+./update_version.sh 1.0.0
 git add web/package.json
-git commit -m "chore: bump version to v0.1.0"
-git tag v0.1.0
+git commit -m "chore: bump version to v1.0.0"
+git tag v1.0.0
 git push origin main --tags
 ```
 
@@ -295,7 +308,7 @@ The script updates `web/package.json` and validates the semver format.
 - [Fuse.js](https://www.fusejs.io) — Client-side fuzzy search
 
 ### Proxy
-- [Nginx](https://nginx.org) 1.27 — Battle-tested HTTP/stream proxy
+- [Nginx](https://nginx.org) 1.29 — Battle-tested HTTP/stream proxy
 
 ### Infrastructure
 - [s6-overlay](https://github.com/just-containers/s6-overlay) — Process supervisor

@@ -75,7 +75,7 @@ describe("syncToNode", () => {
       ok: true,
       json: () => Promise.resolve({ success: true }),
     };
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockResponse);
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockResponse);
 
     const result = await syncToNode(1);
 
@@ -114,7 +114,7 @@ describe("syncToNode", () => {
       status: "offline",
     });
 
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("Connection refused")
     );
 
@@ -148,7 +148,7 @@ describe("syncToNode", () => {
       status: 500,
       text: () => Promise.resolve("Internal Server Error"),
     };
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockResponse);
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockResponse);
 
     const result = await syncToNode(3);
 
@@ -178,7 +178,7 @@ describe("syncToAllNodes", () => {
       .mockReturnValueOnce({ id: 1, name: "worker-1", url: "https://w1.example.com", apiKey: "k1", role: "worker", status: "offline" })
       .mockReturnValueOnce({ id: 2, name: "worker-2", url: "https://w2.example.com", apiKey: "k2", role: "worker", status: "offline" });
 
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
 
     const results = await syncToAllNodes();
 

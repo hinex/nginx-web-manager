@@ -24,6 +24,23 @@ import { eq } from "drizzle-orm";
 
 const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
+/**
+ * Prepare a backup row for insertion: JSON serialization turns Date columns
+ * into ISO strings, which drizzle's timestamp_ms mapper cannot store. Original
+ * ids are kept — tables are fully cleared before restore, and dropping them
+ * would break foreign keys (hosts.groupId, accessListClients.accessListId).
+ */
+function reviveRow<T>(row: unknown): T {
+  const out = { ...(row as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(out)) {
+    if (key.endsWith("At") && (typeof value === "string" || typeof value === "number")) {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) out[key] = date;
+    }
+  }
+  return out as T;
+}
+
 export async function action({ request }: Route.ActionArgs) {
   const user = await requireAdmin(request);
   const body = await request.json();
@@ -105,22 +122,19 @@ export async function action({ request }: Route.ActionArgs) {
         tx.delete(accessListAuth).run();
         tx.delete(accessLists).run();
         for (const row of dbData.accessLists) {
-          const { id, ...data } = row as Record<string, unknown>;
-          tx.insert(accessLists).values(data).run();
+          tx.insert(accessLists).values(reviveRow<typeof accessLists.$inferInsert>(row)).run();
         }
       }
 
       if (Array.isArray(dbData.accessListClients)) {
         for (const row of dbData.accessListClients) {
-          const { id, ...data } = row as Record<string, unknown>;
-          tx.insert(accessListClients).values(data).run();
+          tx.insert(accessListClients).values(reviveRow<typeof accessListClients.$inferInsert>(row)).run();
         }
       }
 
       if (Array.isArray(dbData.accessListAuth)) {
         for (const row of dbData.accessListAuth) {
-          const { id, ...data } = row as Record<string, unknown>;
-          tx.insert(accessListAuth).values(data).run();
+          tx.insert(accessListAuth).values(reviveRow<typeof accessListAuth.$inferInsert>(row)).run();
         }
       }
 
@@ -133,16 +147,14 @@ export async function action({ request }: Route.ActionArgs) {
       if (Array.isArray(dbData.hostGroups)) {
         tx.delete(hostGroups).run();
         for (const row of dbData.hostGroups) {
-          const { id, ...data } = row as Record<string, unknown>;
-          tx.insert(hostGroups).values(data).run();
+          tx.insert(hostGroups).values(reviveRow<typeof hostGroups.$inferInsert>(row)).run();
         }
       }
 
       // Hosts: re-insert (after host groups so FK references are valid)
       if (Array.isArray(dbData.hosts)) {
         for (const row of dbData.hosts) {
-          const { id, ...data } = row as Record<string, unknown>;
-          tx.insert(hosts).values(data).run();
+          tx.insert(hosts).values(reviveRow<typeof hosts.$inferInsert>(row)).run();
         }
       }
 
@@ -150,8 +162,7 @@ export async function action({ request }: Route.ActionArgs) {
       if (Array.isArray(backup.customTemplates)) {
         tx.delete(customTemplates).run();
         for (const row of backup.customTemplates) {
-          const { id, ...data } = row as Record<string, unknown>;
-          tx.insert(customTemplates).values(data).run();
+          tx.insert(customTemplates).values(reviveRow<typeof customTemplates.$inferInsert>(row)).run();
         }
       }
     });

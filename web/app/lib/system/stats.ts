@@ -82,6 +82,8 @@ function getNginxStatus(): SystemStats["nginx"] {
       "curl -s http://127.0.0.1:51820/nginx_status 2>/dev/null || curl -s http://127.0.0.1:80/nginx_status 2>/dev/null",
       { encoding: "utf-8", timeout: 2000 }
     );
+    // A missing stub_status endpoint returns an HTML error page — not zeros
+    if (!res.includes("Active connections:")) return null;
     const active = parseInt(res.match(/Active connections:\s*(\d+)/)?.[1] || "0");
     const counts = res.match(/\s(\d+)\s+(\d+)\s+(\d+)\s*\n/);
     const accepted = parseInt(counts?.[1] || "0");

@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockHash = vi.fn();
-vi.stubGlobal("Bun", { password: { hash: mockHash } });
+if (typeof Bun !== "undefined") {
+  // Under the Bun runtime the `Bun` global is non-configurable, so stubGlobal throws
+  vi.spyOn(Bun.password, "hash").mockImplementation(mockHash as never);
+} else {
+  vi.stubGlobal("Bun", { password: { hash: mockHash } });
+}
 
 import { hashBasicAuthPasswords } from "./hash-basic-auth";
 

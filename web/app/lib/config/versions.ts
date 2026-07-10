@@ -15,7 +15,7 @@ export interface SaveVersionInput {
  * Save a config version snapshot.
  */
 export function saveVersion(input: SaveVersionInput) {
-  const [version] = db
+  return db
     .insert(configVersions)
     .values({
       filePath: input.filePath,
@@ -24,8 +24,8 @@ export function saveVersion(input: SaveVersionInput) {
       userId: input.userId ?? null,
       message: input.message ?? null,
     })
-    .returning();
-  return version;
+    .returning()
+    .get();
 }
 
 /**

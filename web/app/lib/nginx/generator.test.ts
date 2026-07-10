@@ -276,7 +276,8 @@ describe("buildServerBlock", () => {
       hsts: true,
     };
     const result = buildServerBlock(host, new Map());
-    expect(result).toContain("listen 443 ssl http2;");
+    expect(result).toContain("listen 443 ssl;");
+    expect(result).toContain("http2 on;");
     expect(result).toContain("ssl_certificate");
     expect(result).toContain("return 301 https://$host$request_uri;");
     expect(result).toContain("Strict-Transport-Security");

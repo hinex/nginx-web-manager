@@ -279,7 +279,7 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                                   <select
                                     value={upstream.protocol || "http"}
                                     onChange={(e) => {
-                                      const newProtocol = e.target.value;
+                                      const newProtocol = e.target.value as "http" | "https" | "grpc" | "grpcs" | "fastcgi";
                                       const loc = locations[locIndex];
                                       const updatedUpstreams = loc.upstreams.map((u) => ({ ...u, protocol: newProtocol }));
                                       updateLocation(locIndex, { upstreams: updatedUpstreams });

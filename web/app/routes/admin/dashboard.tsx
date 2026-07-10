@@ -384,7 +384,7 @@ function MiniAreaChart({ data, color }: { data: number[]; color: string }) {
         </defs>
         <Tooltip
           contentStyle={{ fontSize: 12, padding: "2px 8px", borderRadius: 6 }}
-          formatter={(val: number) => [`${val.toFixed(1)}%`, ""]}
+          formatter={(val) => [`${Number(val ?? 0).toFixed(1)}%`, ""]}
           labelFormatter={() => ""}
         />
         <Area

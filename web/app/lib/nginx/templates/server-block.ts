@@ -81,9 +81,12 @@ export function buildServerBlock(
   serverLines.push("    listen [::]:80;");
 
   if (hasSsl) {
-    const http2Flag = host.http2 ? " http2" : "";
-    serverLines.push(`    listen 443 ssl${http2Flag};`);
-    serverLines.push(`    listen [::]:443 ssl${http2Flag};`);
+    serverLines.push("    listen 443 ssl;");
+    serverLines.push("    listen [::]:443 ssl;");
+    // nginx >= 1.25.1: "listen ... http2" is deprecated in favor of the http2 directive
+    if (host.http2) {
+      serverLines.push("    http2 on;");
+    }
   }
 
   // Server name
@@ -227,23 +230,24 @@ export function buildServerBlock(
             const u = loc.upstreams[0];
             const resolverValid = host.dnsResolverValid || "30s";
             serverLines.push(`        resolver ${host.dnsResolver} valid=${resolverValid};`);
-            serverLines.push(`        set $backend_${upstreamName} "${protocol}://${u.server}:${u.port}";`);
 
             switch (protocol) {
               case "grpc":
-                serverLines.push(`        grpc_pass grpc://${u.server}:${u.port};`);
-                break;
               case "grpcs":
-                serverLines.push(`        grpc_pass grpcs://${u.server}:${u.port};`);
+                serverLines.push(`        set $backend_${upstreamName} "${protocol}://${u.server}:${u.port}";`);
+                serverLines.push(`        grpc_pass $backend_${upstreamName};`);
                 break;
               case "fastcgi":
-                serverLines.push(`        fastcgi_pass ${u.server}:${u.port};`);
+                // fastcgi_pass expects host:port without a scheme
+                serverLines.push(`        set $backend_${upstreamName} "${u.server}:${u.port}";`);
+                serverLines.push(`        fastcgi_pass $backend_${upstreamName};`);
                 serverLines.push("        include fastcgi_params;");
                 serverLines.push("        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;");
                 break;
               case "http":
               case "https":
               default:
+                serverLines.push(`        set $backend_${upstreamName} "${protocol}://${u.server}:${u.port}";`);
                 serverLines.push(`        proxy_pass $backend_${upstreamName};`);
                 break;
             }

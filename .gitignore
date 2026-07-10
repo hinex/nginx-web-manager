@@ -36,3 +36,4 @@ web/e2e/.test-data/
 web/playwright-report/
 web/test-results/
 web/debug-domain.png
+AGENTS.md
