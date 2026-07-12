@@ -145,7 +145,15 @@ export function publishConfig(auth: AuthContext, filePath: string): PublishResul
   }
 
   writeFileSync(livePath, draftContent);
-  const validation = validateNginxConfig();
+  let validation: { valid: boolean; error?: string };
+  try {
+    validation = validateNginxConfig();
+  } catch (err) {
+    // Restore live content if the validator itself blows up (spawn failure etc.)
+    if (original !== null) writeFileSync(livePath, original);
+    else unlinkSync(livePath);
+    throw err;
+  }
   if (!validation.valid) {
     if (original !== null) writeFileSync(livePath, original);
     else unlinkSync(livePath);

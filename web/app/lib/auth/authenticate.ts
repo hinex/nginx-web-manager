@@ -7,13 +7,15 @@ import { checkRateLimit, recordFailedAttempt } from "./rate-limit";
 import { verifyApiToken } from "./tokens";
 import { intersectScopes, ROLE_CEILINGS, type Role, type Scope } from "./scopes";
 
-export interface AuthContext {
+interface AuthContextBase {
   userId: number;
   role: Role;
-  via: "session" | "token";
-  tokenId?: number;
   scopes: Scope[];
 }
+
+export type AuthContext =
+  | (AuthContextBase & { via: "session"; tokenId?: undefined })
+  | (AuthContextBase & { via: "token"; tokenId: number });
 
 /**
  * Single auth entry point for API/MCP consumers.

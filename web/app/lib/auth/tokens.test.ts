@@ -33,6 +33,7 @@ import {
   createApiToken,
   verifyApiToken,
   revokeApiToken,
+  listApiTokens,
 } from "./tokens";
 
 const mockDb = db as any;
@@ -163,5 +164,35 @@ describe("revokeApiToken", () => {
     mockDb.get.mockReturnValueOnce({ id: 9, userId: 2, revokedAt: null });
     expect(revokeApiToken(9, 2)).toBe(true);
     expect(mockDb.update).toHaveBeenCalled();
+  });
+
+  it("returns false on double revoke (already revoked)", () => {
+    mockDb.get.mockReturnValueOnce({ id: 9, userId: 2, revokedAt: new Date() });
+    expect(revokeApiToken(9, 2)).toBe(false);
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+
+  it("returns false when token does not exist", () => {
+    mockDb.get.mockReturnValueOnce(undefined);
+    expect(revokeApiToken(404, 2)).toBe(false);
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("listApiTokens", () => {
+  it("selects only the given user's tokens, newest first, without tokenHash", () => {
+    const rows = [
+      { id: 2, name: "b", scopes: ["configs:read"], expiresAt: null, lastUsedAt: null, revokedAt: null, createdAt: new Date() },
+      { id: 1, name: "a", scopes: [], expiresAt: null, lastUsedAt: null, revokedAt: null, createdAt: new Date(0) },
+    ];
+    mockDb.all.mockReturnValueOnce(rows);
+    const result = listApiTokens(2);
+    expect(result).toBe(rows);
+    // select projection must not include token_hash
+    const projection = mockDb.select.mock.calls[0][0];
+    expect(projection).toBeDefined();
+    expect(Object.values(projection)).not.toContain("token_hash");
+    expect(mockDb.where).toHaveBeenCalled();
+    expect(mockDb.orderBy).toHaveBeenCalled();
   });
 });

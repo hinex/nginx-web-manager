@@ -13,7 +13,7 @@ vi.mock("~/lib/nginx/validator", () => ({ validateNginxConfig: vi.fn(() => ({ va
 vi.mock("~/lib/nginx/reload", () => ({ reloadNginx: vi.fn(() => true) }));
 vi.mock("~/lib/audit/log", () => ({ logAudit: vi.fn() }));
 
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "fs";
 import { saveVersion } from "~/lib/config/versions";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
@@ -27,6 +27,7 @@ import {
   writeConfigDraft,
   publishConfig,
   deleteConfig,
+  listConfigs,
 } from "./configs";
 
 const ctx = (scopes: Scope[]): AuthContext => ({
@@ -175,6 +176,53 @@ describe("publishConfig", () => {
     expect(vi.mocked(writeFileSync).mock.calls.at(-1)).toEqual([LIVE, "live content"]);
     expect(unlinkSync).not.toHaveBeenCalled();
     expect(reloadNginx).not.toHaveBeenCalled();
+  });
+
+  it("restores live content when the validator itself throws", () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockImplementation((p) =>
+      (p === DRAFT ? "draft content" : "live content") as any
+    );
+    vi.mocked(validateNginxConfig).mockImplementation(() => {
+      throw new Error("nginx binary missing");
+    });
+    expect(() => publishConfig(ctx(["configs:publish"]), LIVE)).toThrow(
+      "nginx binary missing"
+    );
+    expect(vi.mocked(writeFileSync).mock.calls.at(-1)).toEqual([LIVE, "live content"]);
+    expect(unlinkSync).not.toHaveBeenCalled();
+    expect(reloadNginx).not.toHaveBeenCalled();
+  });
+});
+
+describe("listConfigs", () => {
+  const entry = (name: string, dir = false) =>
+    ({ name, isDirectory: () => dir }) as any;
+
+  it("requires configs:read", () => {
+    expect(() => listConfigs(ctx([]))).toThrow(ForbiddenError);
+  });
+
+  it("splits .conf files and drafts, recursing into directories", () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readdirSync)
+      .mockReturnValueOnce([
+        entry("site.conf"),
+        entry("pending.conf.draft"),
+        entry("nested", true),
+        entry("readme.md"),
+      ])
+      .mockReturnValueOnce([entry("inner.conf")]);
+    const result = listConfigs(ctx(["configs:read"]));
+    expect(result.files.some((f) => f.endsWith("site.conf"))).toBe(true);
+    expect(result.files.some((f) => f.endsWith("inner.conf"))).toBe(true);
+    expect(result.drafts.some((f) => f.endsWith("pending.conf.draft"))).toBe(true);
+    expect(result.files.some((f) => f.endsWith("readme.md"))).toBe(false);
+  });
+
+  it("returns empty lists when nginx dir is absent", () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    expect(listConfigs(ctx(["configs:read"]))).toEqual({ files: [], drafts: [] });
   });
 });
 
