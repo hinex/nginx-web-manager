@@ -8,7 +8,7 @@ import {
 } from "./scopes";
 
 describe("scopes", () => {
-  it("defines exactly the seven spec scopes in order", () => {
+  it("defines exactly the nine spec scopes in order", () => {
     expect(ALL_SCOPES).toEqual([
       "configs:read",
       "configs:write",
@@ -16,6 +16,8 @@ describe("scopes", () => {
       "nginx:validate",
       "nginx:reload",
       "hosts:read",
+      "hosts:write",
+      "hosts:publish",
       "stats:read",
     ]);
   });
@@ -35,7 +37,7 @@ describe("scopes", () => {
     ]);
   });
 
-  it("editor ceiling adds write, publish, reload", () => {
+  it("editor ceiling adds write, publish, reload, hosts:write, hosts:publish", () => {
     expect(ROLE_CEILINGS.editor).toEqual([
       "configs:read",
       "hosts:read",
@@ -44,6 +46,8 @@ describe("scopes", () => {
       "configs:write",
       "configs:publish",
       "nginx:reload",
+      "hosts:write",
+      "hosts:publish",
     ]);
   });
 
@@ -70,5 +74,22 @@ describe("scopes", () => {
   it("isScope narrows correctly", () => {
     expect(isScope("configs:read")).toBe(true);
     expect(isScope("root:everything")).toBe(false);
+  });
+
+  it("isScope recognises hosts:write and hosts:publish", () => {
+    expect(isScope("hosts:write")).toBe(true);
+    expect(isScope("hosts:publish")).toBe(true);
+  });
+
+  it("intersectScopes: viewer excludes hosts:write and hosts:publish", () => {
+    expect(
+      intersectScopes(["hosts:read", "hosts:write", "hosts:publish"], "viewer"),
+    ).toEqual(["hosts:read"]);
+  });
+
+  it("intersectScopes: editor includes hosts:write and hosts:publish", () => {
+    expect(
+      intersectScopes(["hosts:write", "hosts:publish"], "editor"),
+    ).toEqual(["hosts:write", "hosts:publish"]);
   });
 });

@@ -7,6 +7,8 @@ export type Scope =
   | "nginx:validate"
   | "nginx:reload"
   | "hosts:read"
+  | "hosts:write"
+  | "hosts:publish"
   | "stats:read";
 
 export type Role = "admin" | "editor" | "viewer";
@@ -18,6 +20,8 @@ export const ALL_SCOPES: Scope[] = [
   "nginx:validate",
   "nginx:reload",
   "hosts:read",
+  "hosts:write",
+  "hosts:publish",
   "stats:read",
 ];
 
@@ -28,6 +32,8 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
   "nginx:validate": "Run nginx -t",
   "nginx:reload": "Reload nginx",
   "hosts:read": "List proxy hosts",
+  "hosts:write": "Create and edit hosts as drafts (never live)",
+  "hosts:publish": "Publish host drafts to live nginx config and delete hosts",
   "stats:read": "Read system status and statistics",
 };
 
@@ -40,7 +46,7 @@ const VIEWER_SCOPES: Scope[] = [
 
 export const ROLE_CEILINGS: Record<Role, Scope[]> = {
   viewer: VIEWER_SCOPES,
-  editor: [...VIEWER_SCOPES, "configs:write", "configs:publish", "nginx:reload"],
+  editor: [...VIEWER_SCOPES, "configs:write", "configs:publish", "nginx:reload", "hosts:write", "hosts:publish"],
   admin: ALL_SCOPES,
 };
 
