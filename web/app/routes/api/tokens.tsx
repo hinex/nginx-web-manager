@@ -13,15 +13,22 @@ export async function loader({ request }: { request: Request }) {
   const user = await requireAuth(request);
   const tokens = listApiTokens(user.userId);
   let mcpPathSecret: string | null = null;
+  let requireMtls = false;
   if (user.role === "admin") {
-    const row = db
+    const secretRow = db
       .select()
       .from(settings)
       .where(eq(settings.key, "mcp_path_secret"))
       .get();
-    mcpPathSecret = row?.value || null;
+    mcpPathSecret = secretRow?.value || null;
+    const mtlsRow = db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, "require_mtls"))
+      .get();
+    requireMtls = mtlsRow?.value === "true";
   }
-  return Response.json({ tokens, mcpPathSecret });
+  return Response.json({ tokens, mcpPathSecret, requireMtls });
 }
 
 export async function action({ request }: { request: Request }) {
@@ -108,6 +115,28 @@ export async function action({ request }: { request: Request }) {
         details: { key: "mcp_path_secret", enabled: !!body.enabled },
       });
       return Response.json({ mcpPathSecret: value || null });
+    }
+
+    case "set_require_mtls": {
+      await requireAdmin(request);
+      const value = body.enabled ? "true" : "false";
+      const existing = db
+        .select()
+        .from(settings)
+        .where(eq(settings.key, "require_mtls"))
+        .get();
+      if (existing) {
+        db.update(settings).set({ value }).where(eq(settings.key, "require_mtls")).run();
+      } else {
+        db.insert(settings).values({ key: "require_mtls", value }).run();
+      }
+      logAudit({
+        userId: user.userId,
+        action: "update",
+        entity: "settings",
+        details: { key: "require_mtls", enabled: !!body.enabled },
+      });
+      return Response.json({ requireMtls: !!body.enabled });
     }
 
     default:

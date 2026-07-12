@@ -54,6 +54,34 @@ export async function checkIpWhitelist(request: Request) {
   }
 }
 
+/**
+ * App-level mTLS gate (defense-in-depth).
+ *
+ * When the `require_mtls` setting is "true", every request MUST carry the
+ * `X-Client-Verify: SUCCESS` header injected by the upstream nginx proxy
+ * (ssl_verify_client on + proxy_set_header X-Client-Verify $ssl_client_verify).
+ *
+ * IMPORTANT: this check is meaningless unless nginx is configured to
+ * OVERWRITE / strip X-Client-Verify on every inbound connection before
+ * forwarding (proxy_set_header X-Client-Verify ""). Without that,
+ * any client can spoof the header. See docs/mtls.md.
+ */
+export async function checkMtls(request: Request): Promise<void> {
+  const row = db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, "require_mtls"))
+    .get();
+  if (row?.value !== "true") return; // flag off or absent — no-op
+
+  if (request.headers.get("x-client-verify") !== "SUCCESS") {
+    throw Response.json(
+      { error: "mTLS required", code: "mtls_required" },
+      { status: 401 }
+    );
+  }
+}
+
 export { getClientIp };
 
 export async function requireAuth(request: Request) {

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "~/lib/db/connection";
 import { apiTokens, users } from "~/lib/db/schema";
 import { getSessionUser } from "./session.server";
-import { checkIpWhitelist, getClientIp } from "./middleware";
+import { checkIpWhitelist, checkMtls, getClientIp } from "./middleware";
 import { checkRateLimit, recordFailedAttempt } from "./rate-limit";
 import { verifyApiToken } from "./tokens";
 import { verifyOAuthToken } from "./jwt.server";
@@ -31,6 +31,7 @@ const JWT_BEARER_RE = /^ey[\w-]+\.[\w-]+\.[\w-]+$/;
  *   2. ey…  JWT format → OAuth token (verifyOAuthToken + liveness re-check)
  */
 export async function authenticate(request: Request): Promise<AuthContext> {
+  await checkMtls(request);
   await checkIpWhitelist(request);
 
   const header = request.headers.get("authorization") ?? "";

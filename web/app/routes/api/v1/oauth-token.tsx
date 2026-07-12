@@ -11,7 +11,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "~/lib/db/connection";
 import { apiTokens, users } from "~/lib/db/schema";
-import { checkIpWhitelist, getClientIp } from "~/lib/auth/middleware";
+import { checkIpWhitelist, checkMtls, getClientIp } from "~/lib/auth/middleware";
 import { checkRateLimit, recordFailedAttempt } from "~/lib/auth/rate-limit";
 import { verifyApiToken } from "~/lib/auth/tokens";
 import { createOAuthToken, OAUTH_JWT_TTL_S } from "~/lib/auth/jwt.server";
@@ -41,6 +41,16 @@ export async function action({ request }: { request: Request }): Promise<Respons
     return Response.json(
       { error: "method_not_allowed" },
       { status: 405, headers: { Allow: "POST", "Cache-Control": NO_STORE } }
+    );
+  }
+
+  // ── mTLS gate (same as authenticate()) ───────────────────────────────────
+  try {
+    await checkMtls(request);
+  } catch {
+    return Response.json(
+      { error: "access_denied" },
+      { status: 401, headers: { "Cache-Control": NO_STORE } }
     );
   }
 

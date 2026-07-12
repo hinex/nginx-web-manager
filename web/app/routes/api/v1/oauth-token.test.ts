@@ -61,6 +61,7 @@ vi.mock("~/lib/db/schema", () => ({
 // ── Auth helper mocks ─────────────────────────────────────────────────────
 vi.mock("~/lib/auth/middleware", () => ({
   checkIpWhitelist: vi.fn(async () => undefined),
+  checkMtls: vi.fn(async () => undefined),
   getClientIp: vi.fn(() => "10.0.0.1"),
 }));
 
@@ -81,6 +82,7 @@ vi.mock("~/lib/auth/session.server", () => ({
 import { db } from "~/lib/db/connection";
 import { verifyApiToken } from "~/lib/auth/tokens";
 import { checkRateLimit, recordFailedAttempt } from "~/lib/auth/rate-limit";
+import { checkMtls } from "~/lib/auth/middleware";
 import { action, loader } from "./oauth-token";
 import { authenticate } from "~/lib/auth/authenticate";
 
@@ -512,5 +514,31 @@ describe("unsupported_grant_type", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("unsupported_grant_type");
     expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// mTLS gate on oauth-token endpoint
+// ═══════════════════════════════════════════════════════════════════════════
+describe("mTLS gate — oauth-token endpoint", () => {
+  it("mTLS failure returns 401 access_denied before credential check", async () => {
+    vi.mocked(checkMtls).mockRejectedValueOnce(
+      Response.json({ error: "mTLS required", code: "mtls_required" }, { status: 401 })
+    );
+    const req = makeFormRequest(defaultParams());
+    const res = await action({ request: req });
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe("access_denied");
+    // verifyApiToken must NOT have been called
+    expect(verifyApiToken).not.toHaveBeenCalled();
+  });
+
+  it("mTLS passing allows the endpoint to proceed normally", async () => {
+    vi.mocked(checkMtls).mockResolvedValueOnce(undefined);
+    setupHappyPath();
+    const req = makeFormRequest(defaultParams());
+    const res = await action({ request: req });
+    expect(res.status).toBe(200);
+    expect(checkMtls).toHaveBeenCalledTimes(1);
   });
 });

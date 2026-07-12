@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("./middleware", () => ({
   checkIpWhitelist: vi.fn(async () => undefined),
+  checkMtls: vi.fn(async () => undefined),
   getClientIp: vi.fn(() => "10.0.0.1"),
 }));
 vi.mock("./rate-limit", () => ({
@@ -38,6 +39,7 @@ import { db } from "~/lib/db/connection";
 import { verifyApiToken } from "./tokens";
 import { checkRateLimit, recordFailedAttempt } from "./rate-limit";
 import { getSessionUser } from "./session.server";
+import { checkMtls } from "./middleware";
 import { authenticate } from "./authenticate";
 
 const mockDb = db as any;
@@ -213,5 +215,58 @@ describe("authenticate — session path", () => {
 
   it("401 when no session and no token", async () => {
     await expectStatus(authenticate(req()), 401);
+  });
+});
+
+// ── mTLS gate (ordering + delegation) ────────────────────────────────────────
+//
+// authenticate() delegates mTLS enforcement to checkMtls() (in middleware.ts).
+// These tests verify:
+//   1. When checkMtls passes (flag off / SUCCESS), auth proceeds normally.
+//   2. When checkMtls throws, the error propagates BEFORE verifyApiToken is called.
+//   3. The call order: checkMtls → checkIpWhitelist → credential verification.
+
+describe("authenticate — mTLS gate ordering", () => {
+  it("checkMtls is called before verifyApiToken", async () => {
+    // Make checkMtls throw a 401 Response — verifyApiToken must NOT be called
+    vi.mocked(checkMtls).mockRejectedValueOnce(
+      Response.json({ error: "mTLS required", code: "mtls_required" }, { status: 401 })
+    );
+    vi.mocked(verifyApiToken).mockReturnValue({ ok: true, tokenId: 1, userId: 1, scopes: [] });
+
+    await expectStatus(authenticate(req({ Authorization: "Bearer ngm_abc" })), 401);
+    expect(verifyApiToken).not.toHaveBeenCalled();
+  });
+
+  it("checkMtls throwing 401 produces mtls_required body", async () => {
+    vi.mocked(checkMtls).mockRejectedValueOnce(
+      Response.json({ error: "mTLS required", code: "mtls_required" }, { status: 401 })
+    );
+
+    try {
+      await authenticate(req({ Authorization: "Bearer ngm_abc" }));
+      throw new Error("expected authenticate to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Response);
+      const body = await (err as Response).json();
+      expect(body.code).toBe("mtls_required");
+      expect((err as Response).status).toBe(401);
+    }
+  });
+
+  it("checkMtls passing (no-op) allows auth to continue normally", async () => {
+    vi.mocked(checkMtls).mockResolvedValueOnce(undefined); // flag off or SUCCESS
+    vi.mocked(verifyApiToken).mockReturnValue({
+      ok: true,
+      tokenId: 5,
+      userId: 2,
+      scopes: ["configs:read"],
+    });
+    dbGetResponses = [{ id: 2, role: "viewer" }];
+
+    const ctx = await authenticate(req({ Authorization: "Bearer ngm_abc" }));
+    expect(ctx.via).toBe("token");
+    expect(checkMtls).toHaveBeenCalledTimes(1);
+    expect(verifyApiToken).toHaveBeenCalled();
   });
 });
