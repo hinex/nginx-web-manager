@@ -26,7 +26,13 @@ export async function loader({ request }: { request: Request }) {
 
 export async function action({ request }: { request: Request }) {
   const user = await requireAuth(request);
-  const body = await request.json();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   switch (body.action) {
     case "create": {
@@ -67,6 +73,9 @@ export async function action({ request }: { request: Request }) {
 
     case "revoke": {
       const tokenId = Number(body.tokenId);
+      if (!Number.isInteger(tokenId)) {
+        return Response.json({ error: "tokenId must be an integer" }, { status: 400 });
+      }
       if (!revokeApiToken(tokenId, user.userId)) {
         return Response.json({ error: "Token not found" }, { status: 404 });
       }

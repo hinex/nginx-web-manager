@@ -29,6 +29,10 @@ export function McpEndpointCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "set_mcp_secret", enabled }),
       });
+      if (!res.ok) {
+        toast.error("Failed to update secret path");
+        return;
+      }
       const data = await res.json();
       setSecret(data.mcpPathSecret ?? null);
       toast.success(
@@ -60,9 +64,13 @@ export function McpEndpointCard() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => {
-              navigator.clipboard.writeText(url);
-              toast.success("Copied");
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(url);
+                toast.success("Copied");
+              } catch {
+                toast.error("Copy failed — select and copy manually");
+              }
             }}
           >
             <Copy className="h-4 w-4" />

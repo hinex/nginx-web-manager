@@ -78,6 +78,26 @@ describe("action create", () => {
   });
 });
 
+describe("action body validation", () => {
+  it("400 on malformed JSON body", async () => {
+    const res = await action({
+      request: new Request("http://localhost/api/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      }),
+    } as any);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Invalid JSON/);
+  });
+
+  it("400 when tokenId is not an integer", async () => {
+    const res = await post({ action: "revoke", tokenId: "abc" });
+    expect(res.status).toBe(400);
+    expect(revokeApiToken).not.toHaveBeenCalled();
+  });
+});
+
 describe("action revoke", () => {
   it("404 when token not found or foreign", async () => {
     vi.mocked(revokeApiToken).mockReturnValue(false);

@@ -39,7 +39,12 @@ export async function action({
 }) {
   checkPathSecret(params);
 
-  const body = await request.json();
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return rpcError(null, -32700, "Parse error: invalid JSON", 400);
+  }
   const { method, id, params: rpcParams } = body;
 
   let auth: AuthContext;

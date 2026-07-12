@@ -76,6 +76,23 @@ describe("mcp path secret", () => {
   });
 });
 
+describe("mcp body parsing", () => {
+  it("returns JSON-RPC -32700 on malformed JSON", async () => {
+    const res = await action({
+      request: new Request("http://localhost/api/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      }),
+      params: {},
+    } as any);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe(-32700);
+    expect(body.id).toBeNull();
+  });
+});
+
 describe("mcp auth", () => {
   it("maps auth failure to JSON-RPC error with original status", async () => {
     vi.mocked(authenticate).mockRejectedValue(
