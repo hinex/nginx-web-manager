@@ -75,8 +75,8 @@ There is no new credential store — revoking the API token immediately revokes 
 
 ### POST /api/v1/oauth/token
 
-- **Content-Type:** `application/x-www-form-urlencoded` (required)
-- **Cache-Control:** `no-store` (always set in response)
+- **Content-Type:** `application/x-www-form-urlencoded` (required; charset suffix like `;charset=UTF-8` is accepted)
+- **Cache-Control / Pragma:** `no-store` / `no-cache` (always set in response, RFC 6749 §5.1)
 - **Auth:** none required on the endpoint itself (credentials are in the form body)
 
 **Form fields:**
