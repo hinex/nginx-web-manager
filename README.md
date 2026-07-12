@@ -26,6 +26,11 @@ Similar to Nginx Proxy Manager, but rebuilt from scratch with a modern tech stac
 - **Web Terminal** — In-browser terminal for container debugging
 - **Audit Logging** — Tracks all configuration changes with user, action, and timestamp
 - **Web Admin UI** — Full CRUD management for all resources, built with React and Tailwind CSS
+- **Scoped API Tokens** — `ngm_…` bearer tokens with granular scopes (`configs:read/write`, `nginx:reload`, `hosts:write/publish`, …) capped by the owner's role; create/revoke from the Security page
+- **REST API v1** — `/api/v1` endpoints for configs, hosts (draft CRUD + transactional publish with `nginx -t` rollback), nginx validate/reload, and stats — see [docs/api-v1.md](docs/api-v1.md)
+- **MCP Server** — Model Context Protocol endpoint (`/api/mcp`) exposing scope-filtered tools for AI agents (Claude Code, etc.), with optional secret URL path
+- **OAuth2 client_credentials** — Exchange an API token for a short-lived JWT at `/api/v1/oauth/token` (RFC 6749)
+- **mTLS Enforcement** — Optional `require_mtls` gate for API/MCP clients via reverse-proxy client-certificate verification — see [docs/mtls.md](docs/mtls.md)
 
 ## Quick Start
 
@@ -197,7 +202,7 @@ Inside the official Docker image `NODE_ENV=production` and `TERMINAL_WS_PORT=300
 | **DNS Management** | Configure the DNS resolver for dynamic upstreams |
 | **Cluster** | Synchronize configuration across nodes |
 | **Terminal** | In-browser terminal for container debugging |
-| **Security** | Security-related settings |
+| **Security** | API tokens (create/revoke, scopes), MCP endpoint management, IP whitelist, mTLS toggle |
 | **Default Page** | Edit the page shown for unconfigured domains |
 | **Logs** | View per-host access and error logs |
 | **Audit Log** | Track configuration changes |
@@ -301,6 +306,28 @@ The watchdog service periodically checks upstream servers and:
 - Records response time and status (up/down)
 - Sends webhook notifications when status changes
 - Supports per-host, per-group, and global webhook URLs
+
+## API & Integrations
+
+Programmatic access is built on **scoped API tokens** (created on the Security page). A token's effective scopes are the intersection of its granted scopes and the ceiling of its owner's role (admin / editor / viewer).
+
+| Surface | Endpoint | Notes |
+|---------|----------|-------|
+| REST API v1 | `/api/v1/*` | Configs, hosts draft CRUD + publish, nginx validate/reload, stats. Reference: [docs/api-v1.md](docs/api-v1.md) |
+| MCP server | `/api/mcp[/:secret]` | Streamable-HTTP MCP endpoint for AI agents; tool list is filtered by token scopes; optional secret path segment |
+| OAuth2 | `/api/v1/oauth/token` | `client_credentials` grant (RFC 6749): `client_id` = `ngm-<tokenId>`, `client_secret` = raw `ngm_…` token → 15-min JWT bearer |
+
+All API surfaces share the same protections: Bearer auth, per-IP rate limiting, optional IP whitelist, and an optional **mTLS gate** ([docs/mtls.md](docs/mtls.md)). Revoking an API token immediately invalidates both the token itself and any JWTs obtained with it (liveness re-check on every request).
+
+```bash
+# REST example
+curl -H "Authorization: Bearer ngm_…" http://localhost:81/api/v1/stats
+
+# OAuth2 example
+curl -X POST http://localhost:81/api/v1/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=ngm-3&client_secret=ngm_…"
+```
 
 ## Development
 
