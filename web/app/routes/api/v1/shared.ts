@@ -40,7 +40,7 @@ export function toResponse(err: unknown): Response {
   }
   if (err instanceof InputValidationError) {
     return Response.json(
-      { error: err.message },
+      { error: err.message, code: toCode(err.name) },
       { status: 400 }
     );
   }

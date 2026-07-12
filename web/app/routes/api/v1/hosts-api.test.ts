@@ -233,7 +233,7 @@ describe("400 on bad :id", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 400 InputValidationError — unknown field / bad domain
 // ═══════════════════════════════════════════════════════════════════════════
-describe("400 InputValidationError → {error} (no code)", () => {
+describe("400 InputValidationError → {error, code}", () => {
   it("POST /api/v1/hosts with unknown field → 400 with message in error", async () => {
     vi.mocked(hostsService.createHost).mockRejectedValue(
       new InputValidationError("Unknown field: labelIds")
@@ -244,8 +244,8 @@ describe("400 InputValidationError → {error} (no code)", () => {
     assertJson(res);
     const body = await res.json();
     expect(body.error).toBe("Unknown field: labelIds");
-    // InputValidationError 400 does NOT expose a `code` field
-    expect(body).not.toHaveProperty("code");
+    // consistent with every other error shape in this API
+    expect(body.code).toBe("input_validation_error");
   });
 
   it("PATCH /api/v1/hosts/:id with unknown field → 400 with message in error", async () => {
