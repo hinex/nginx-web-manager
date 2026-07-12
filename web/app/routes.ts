@@ -20,6 +20,7 @@ export default [
   route("api/import", "./routes/api/import.tsx"),
   route("api/import-apply", "./routes/api/import-apply.tsx"),
   route("api/mcp/:secret?", "./routes/api/mcp.tsx"),
+  route("api/tokens", "./routes/api/tokens.tsx"),
   route("api/cluster-receive", "./routes/api/cluster-receive.tsx"),
   route("api/dns", "./routes/api/dns.tsx"),
   route("api/acme-dns", "./routes/api/acme-dns.tsx"),
