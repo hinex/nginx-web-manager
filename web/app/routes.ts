@@ -31,6 +31,10 @@ export default [
   route("api/v1/nginx/validate", "./routes/api/v1/nginx.validate.ts"),
   route("api/v1/nginx/reload", "./routes/api/v1/nginx.reload.ts"),
   route("api/v1/stats", "./routes/api/v1/stats.ts"),
+  route("api/v1/hosts", "./routes/api/v1/hosts.ts"),
+  route("api/v1/hosts/:id", "./routes/api/v1/hosts.$id.ts"),
+  route("api/v1/hosts/:id/draft", "./routes/api/v1/hosts.$id.draft.ts"),
+  route("api/v1/hosts/:id/publish", "./routes/api/v1/hosts.$id.publish.ts"),
 
   layout("./routes/admin/layout.tsx", [
     ...prefix("admin", [
