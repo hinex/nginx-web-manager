@@ -43,8 +43,8 @@ export function toResponse(err: unknown): Response {
       { status: 422 }
     );
   }
-  const message = err instanceof Error ? err.message : "Internal server error";
-  return Response.json({ error: message, code: "internal_error" }, { status: 500 });
+  console.error("[api/v1] unhandled error:", err);
+  return Response.json({ error: "Internal server error", code: "internal_error" }, { status: 500 });
 }
 
 /**

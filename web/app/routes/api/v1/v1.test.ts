@@ -435,6 +435,20 @@ describe("never-HTML assertion", () => {
     expect(body.code).toBe("internal_error");
   });
 
+  it("unknown error body is generic — no internal detail leaked", async () => {
+    vi.mocked(configsService.listConfigs).mockImplementation(() => {
+      throw new Error("secret /etc/path detail");
+    });
+    const req = makeRequest("GET", "http://localhost/api/v1/configs");
+    const res = await configsLoader({ request: req, params: {} });
+    expect(res.status).toBe(500);
+    assertJson(res);
+    const body = await res.json();
+    expect(body.error).toBe("Internal server error");
+    expect(body.code).toBe("internal_error");
+    expect(body.error).not.toContain("secret");
+  });
+
   it("every 405 response is JSON", async () => {
     const cases: Array<Promise<Response>> = [
       configsAction({ request: makeRequest("POST", "http://localhost/api/v1/configs"), params: {} }),
