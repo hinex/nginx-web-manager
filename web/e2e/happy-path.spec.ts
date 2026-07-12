@@ -30,9 +30,10 @@ test.describe("Happy path: setup → login → create host", () => {
     await expect(page.getByText("Add Host")).toBeVisible();
 
     // ── Step 7: Fill the host form — General tab ──
-    // Add a domain
+    // Add a domain — use pressSequentially so React onChange fires per character
     const domainInput = page.getByPlaceholder("example.com");
-    await domainInput.fill("test.example.com");
+    await domainInput.click();
+    await domainInput.pressSequentially("test.example.com");
     await domainInput.press("Enter");
     await page.screenshot({ path: "debug-domain.png" });
     // Verify domain badge appeared
@@ -43,18 +44,22 @@ test.describe("Happy path: setup → login → create host", () => {
     // Default location "/" should already be expanded (only 1 location)
     // Add upstream
     await page.getByRole("button", { name: "Add Upstream" }).click();
-    // Fill upstream server and port
-    await page.getByPlaceholder("Server").fill("127.0.0.1");
+    // Fill upstream server and port — use pressSequentially so React onChange fires per character
+    const serverInput = page.getByPlaceholder("Server");
+    await serverInput.click();
+    await serverInput.pressSequentially("127.0.0.1");
     // Port field has default value 80, need to clear first
-    const portInput = page.getByPlaceholder("Port");
-    await portInput.clear();
-    await portInput.fill("3000");
+    const portInput = page.getByPlaceholder("Port").first();
+    await portInput.click();
+    await portInput.selectText();
+    await portInput.pressSequentially("3000");
 
     // ── Step 9: Publish the host ──
     await page.getByRole("button", { name: "Publish" }).click();
 
     // ── Step 10: Should redirect to hosts list with the new host ──
     await expect(page).toHaveURL(/\/admin\/hosts/, { timeout: 10000 });
-    await expect(page.getByText("test.example.com")).toBeVisible();
+    // Scope to the visible desktop table (the mobile card has md:hidden and is not visible at 1280px)
+    await expect(page.locator("table").getByText("test.example.com")).toBeVisible();
   });
 });
