@@ -25,6 +25,12 @@ export default [
   route("api/dns", "./routes/api/dns.tsx"),
   route("api/acme-dns", "./routes/api/acme-dns.tsx"),
   route("api/user-theme", "./routes/api/user-theme.tsx"),
+  route("api/v1/configs", "./routes/api/v1/configs.ts"),
+  route("api/v1/configs/file", "./routes/api/v1/configs.file.ts"),
+  route("api/v1/configs/publish", "./routes/api/v1/configs.publish.ts"),
+  route("api/v1/nginx/validate", "./routes/api/v1/nginx.validate.ts"),
+  route("api/v1/nginx/reload", "./routes/api/v1/nginx.reload.ts"),
+  route("api/v1/stats", "./routes/api/v1/stats.ts"),
 
   layout("./routes/admin/layout.tsx", [
     ...prefix("admin", [
