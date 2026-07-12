@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { authenticate, type AuthContext } from "~/lib/auth/authenticate";
 import {
@@ -17,7 +18,13 @@ function checkPathSecret(params: { secret?: string }) {
     .where(eq(settings.key, "mcp_path_secret"))
     .get();
   const secret = row?.value?.trim() || "";
-  const ok = secret ? params.secret === secret : params.secret === undefined;
+  const ok = secret
+    ? typeof params.secret === "string" &&
+      timingSafeEqual(
+        createHash("sha256").update(params.secret).digest(),
+        createHash("sha256").update(secret).digest()
+      )
+    : params.secret === undefined;
   if (!ok) {
     throw new Response("Not Found", { status: 404 });
   }
@@ -80,6 +87,9 @@ export async function action({
       });
 
     case "tools/call": {
+      if (typeof rpcParams?.name !== "string") {
+        return rpcError(id, -32602, "Invalid params: name is required", 200);
+      }
       const result = await handleToolCall(auth, rpcParams.name, rpcParams.arguments ?? {});
       return Response.json({ jsonrpc: "2.0", id, result });
     }
@@ -92,6 +102,9 @@ export async function action({
       });
 
     case "resources/read": {
+      if (typeof rpcParams?.uri !== "string") {
+        return rpcError(id, -32602, "Invalid params: uri is required", 200);
+      }
       const readResult = await handleResourceRead(auth, rpcParams.uri);
       return Response.json({
         jsonrpc: "2.0",
@@ -139,18 +152,22 @@ export async function loader({
   const url = new URL(request.url);
   const endpoint = `${url.origin}/api/mcp${params.secret ? `/${params.secret}` : ""}`;
 
+  let pingInterval: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(
         new TextEncoder().encode(`event: endpoint\ndata: ${endpoint}\n\n`)
       );
-      const interval = setInterval(() => {
+      pingInterval = setInterval(() => {
         try {
           controller.enqueue(new TextEncoder().encode(": ping\n\n"));
         } catch {
-          clearInterval(interval);
+          clearInterval(pingInterval);
         }
       }, 30000);
+    },
+    cancel() {
+      clearInterval(pingInterval);
     },
   });
 

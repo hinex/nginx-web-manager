@@ -91,6 +91,20 @@ describe("mcp body parsing", () => {
     expect(body.error.code).toBe(-32700);
     expect(body.id).toBeNull();
   });
+
+  it("returns -32602 when tools/call has no name", async () => {
+    const res = await rpc("tools/call", { arguments: {} });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.error.code).toBe(-32602);
+  });
+
+  it("returns -32602 when resources/read has no uri", async () => {
+    const res = await rpc("resources/read", {});
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.error.code).toBe(-32602);
+  });
 });
 
 describe("mcp auth", () => {
