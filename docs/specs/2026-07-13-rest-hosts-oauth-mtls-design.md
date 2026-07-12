@@ -16,7 +16,8 @@ The token/MCP layer is done, but:
 ## Decisions (user: "делай максимум")
 
 - All four items, one plan.
-- hosts:write — **not** a literal draft/publish layer. Host configs are *generated* from DB rows by `generateAllConfigs()`; a filesystem draft layer doesn't map onto that. Instead: **transactional apply** — DB change + regenerate + `nginx -t`; on failure, roll back the DB change and regenerate back. Same safety property as draft/publish (invalid config never goes live), no new state to manage.
+- hosts:write — hosts **already have** a native draft mechanism (`hosts.draft` JSON column; UI `saveDraft` stores the pending form there, `publish` validates + applies + regenerates + reloads). The service layer mirrors that instead of inventing anything: draft saves go to the `draft` column (no filesystem/nginx effect), publish is a **transactional apply** — DB update + `generateAllConfigs()` + `nginx -t`; on failure, restore the previous row state and regenerate back. Invalid config never goes live.
+- Scope symmetry with configs (parent design: "draft-only by default"): `hosts:write` = draft saves only; **`hosts:publish`** = publish/delete/direct apply.
 - REST /api/v1 — full mirror of `lib/services/` (configs, hosts, nginx, stats). Token *management* stays session-only (existing `/api/tokens`), never exposed to bearer auth.
 - OAuth2 — `client_credentials` grant only, implemented as a thin exchange on top of existing `api_tokens` (no new credential store).
 - mTLS — terminated at the nginx edge (docs + generated snippet), with an optional app-level header check as defense-in-depth. No certificate handling in the app.
@@ -35,27 +36,30 @@ Tests: symlink file → outside file; symlink dir inside nginx dir → outside d
 
 ## 2. `hosts:write` — host CRUD via services + MCP
 
-**New scope** `hosts:write` in `ALL_SCOPES`; ceilings: editor+ (viewer stays read-only), admin all. Scope table addition:
+**New scopes** `hosts:write` + `hosts:publish` in `ALL_SCOPES`; ceilings: editor+ (viewer stays read-only), admin all. Scope table addition:
 
 | Scope | Grants |
 |---|---|
-| `hosts:write` | `create_host`, `update_host`, `delete_host`, `set_host_enabled` |
+| `hosts:write` | `create_host` (as draft), `update_host` (as draft), `discard_host_draft` |
+| `hosts:publish` | `publish_host` (draft → live: validate + regenerate + `nginx -t` + reload), `delete_host` |
 
-**Service layer** (`lib/services/hosts.ts`):
+**Service layer** (`lib/services/hosts.ts`), mirroring the UI mechanics in `admin/hosts/{new,edit}.tsx`:
 
-- `getHost(auth, id)` — `hosts:read`.
-- `createHost(auth, input)`, `updateHost(auth, id, patch)`, `deleteHost(auth, id)`, `setHostEnabled(auth, id, enabled)` — `hosts:write`.
-- Input = subset of the `hosts` table columns: `domains` (non-empty string[], each a valid hostname), `groupId`, `enabled`, SSL block (`sslType`/`sslForceHttps`/`sslCertPath`/`sslKeyPath`/`hsts`/`http2`), `compression`, `redirectWww`, `clientMaxBodySize`, `locations`. Validation mirrors what `admin/hosts/new.tsx` enforces; reject unknown keys.
-- **Apply pipeline** (shared helper, used by every mutator):
-  1. Snapshot the current row (for update/delete).
-  2. Apply DB change.
-  3. `generateAllConfigs()` → `validateNginxConfig()`.
-  4. Invalid → restore snapshot (or delete created row), `generateAllConfigs()` again, throw `ValidationFailedError` carrying `nginx -t` stderr. Nothing changed.
-  5. Valid → `logAudit` (`entity: "host"`, action, `userId`, `tokenId` when via token), return the row + `{ reloadRequired: true }`.
-- **No auto-reload.** Files on disk are updated and valid; making nginx serve them requires the separate `nginx:reload` scope (`reload_nginx` tool / `POST /api/v1/nginx/reload`). Consistent with configs:publish semantics already shipped… but note `publishConfig` DOES reload — mirror that precedent instead? **Decision:** keep parity with the UI host flow (`admin/hosts/edit.tsx` reloads after save): mutators accept `reload?: boolean` (default `false`); `reload: true` additionally requires `nginx:reload` scope and calls `reloadNginx()`. Explicit, capability-gated, no surprise.
-- SSL cert/key paths in input: must pass the same realpath containment idea — reject paths outside allowed cert dirs? Existing UI accepts arbitrary paths (admin-trusted). For token callers, restrict `sslCertPath`/`sslKeyPath` to existing files; document that path policy matches UI otherwise (audit-logged).
+- `getHost(auth, id)` — `hosts:read`, includes `draft` payload. `listHosts` already ships.
+- `createHost(auth, input)` — `hosts:write`. Like UI `new.tsx` draft path: inserts a row with `enabled: false`, `locations: []`, `domains: input.domains ?? []`, and the full payload in the `draft` column. No filesystem effect. Returns the row.
+- `updateHost(auth, id, patch)` — `hosts:write`. Stores merged payload into `draft` column only (`draft: { ...currentEffective, ...patch }`), `updatedAt` bumped. Live fields untouched.
+- `discardHostDraft(auth, id)` — `hosts:write`. Sets `draft: null` (UI parity: edit.tsx:75-78).
+- `publishHost(auth, id)` — `hosts:publish`. Pipeline:
+  1. Load row; effective data = `draft ?? current fields`; run the publish validation copied from `edit.tsx` (domains required when HTTP locations exist; ≥1 location or stream port; unique `matchType+path`; proxy locations need ≥1 upstream with server + port 1-65535).
+  2. Snapshot current row.
+  3. Write effective data to main columns, `draft: null`.
+  4. `generateAllConfigs()` → `validateNginxConfig()`.
+  5. Invalid → restore snapshot, `generateAllConfigs()` again, throw `HostValidationError` carrying `nginx -t` stderr. Nothing goes live.
+  6. Valid → `reloadNginx()` (UI parity — publish reloads, same as `publishConfig`), `logAudit` (`entity: "host"`, action, `userId`, tokenId via `auditDetails` pattern), return row.
+- `deleteHost(auth, id)` — `hosts:publish` (destructive-live, same tier as `delete_config`): snapshot, delete row, `removeHostConfig(id)` + `generateAllConfigs()` → `validateNginxConfig()`; invalid → restore + regenerate + throw; valid → reload + audit.
+- Input validation before any write: `domains` string[] of valid hostnames, `locations`/`streamPorts` shape-checked against the schema types, unknown keys rejected. `basicAuth` passwords must arrive pre-hashed or via the UI — token callers get plaintext hashing through the same `hashBasicAuthPasswords` helper the routes use.
 
-**MCP tools** (registered behind scopes like existing ones): `get_host`, `create_host`, `update_host`, `delete_host` (+ `enabled` handled via `update_host`). `list_hosts` gains full row output (it already returns rows).
+**MCP tools** (registered behind scopes like existing ones): `get_host`, `create_host`, `update_host`, `publish_host`, `discard_host_draft`, `delete_host`. `list_hosts` unchanged.
 
 ## 3. REST `/api/v1`
 
@@ -69,8 +73,11 @@ Thin controllers over `lib/services/` in `web/app/routes/api/v1/`. Every handler
 | `POST /api/v1/configs/publish?path=` | `publishConfig` | `configs:publish` |
 | `DELETE /api/v1/configs/file?path=` | `deleteConfig` | `configs:publish` |
 | `GET /api/v1/hosts`, `GET /api/v1/hosts/:id` | `listHosts`/`getHost` | `hosts:read` |
-| `POST /api/v1/hosts` | `createHost` | `hosts:write` |
-| `PATCH /api/v1/hosts/:id`, `DELETE /api/v1/hosts/:id` | `updateHost`/`deleteHost` | `hosts:write` |
+| `POST /api/v1/hosts` (draft) | `createHost` | `hosts:write` |
+| `PATCH /api/v1/hosts/:id` (draft) | `updateHost` | `hosts:write` |
+| `DELETE /api/v1/hosts/:id/draft` | `discardHostDraft` | `hosts:write` |
+| `POST /api/v1/hosts/:id/publish` | `publishHost` | `hosts:publish` |
+| `DELETE /api/v1/hosts/:id` | `deleteHost` | `hosts:publish` |
 | `POST /api/v1/nginx/validate` | `validate` | `nginx:validate` |
 | `POST /api/v1/nginx/reload` | `reload` | `nginx:reload` |
 | `GET /api/v1/stats` | `getStats` | `stats:read` |
@@ -103,7 +110,7 @@ Purpose: clients that can only be configured with an OAuth token URL + client id
 
 - OAuth2 authorization_code / device flows, refresh tokens
 - App-side certificate management (issuing, pinning, CRL)
-- Draft/publish state machine for hosts (see Decisions — transactional apply instead)
+- A separate host-draft store (reuses the existing `hosts.draft` column and UI semantics)
 - Public OpenAPI/Swagger generation (hand-written `docs/api-v1.md` for now)
 
 ## Testing
