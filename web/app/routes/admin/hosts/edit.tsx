@@ -11,6 +11,7 @@ import { generateAllConfigs } from "~/lib/nginx/generator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { hashBasicAuthPasswords } from "~/lib/auth/hash-basic-auth";
+import { validatePublishData } from "~/lib/hosts/validate";
 
 export function meta() {
   return [{ title: "Edit Host — Nginx Manager" }];
@@ -102,66 +103,8 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   // Only validate for publish
   if (!isDraft) {
-    const hasHttpLocations = data.locations.length > 0;
-    if (hasHttpLocations && (!data.domains || data.domains.length === 0)) {
-      return { error: "At least one domain is required for HTTP locations" };
-    }
-
-    if (data.locations.length === 0 && data.streamPorts.length === 0) {
-      return { error: "At least one location or stream port is required" };
-    }
-
-    // Validate no duplicate location paths
-    const locationKeys = data.locations.map((l) => {
-      const prefix = l.matchType === "exact" ? "= " : l.matchType === "regex" ? "~ " : "";
-      return `${prefix}${l.path}`;
-    });
-    const seen = new Set<string>();
-    for (const key of locationKeys) {
-      if (seen.has(key)) {
-        return { error: `Duplicate location "${key}". Each location path + match type must be unique.` };
-      }
-      seen.add(key);
-    }
-
-    for (const loc of data.locations) {
-      if (loc.type === "proxy") {
-        if (!loc.upstreams || loc.upstreams.length === 0) {
-          return { error: `Proxy location "${loc.path}" needs at least one upstream` };
-        }
-        for (const u of loc.upstreams) {
-          if (!u.server?.trim()) return { error: "All upstreams must have a server address" };
-          if (!u.port || u.port < 1 || u.port > 65535) return { error: "Upstream port must be 1-65535" };
-        }
-        // Validate all upstreams in a location use the same protocol
-        const protocols = new Set(loc.upstreams.map((u: any) => u.protocol || "http"));
-        if (protocols.size > 1) {
-          return { error: `Proxy location "${loc.path}" has mixed upstream protocols. All upstreams in a location must use the same protocol.` };
-        }
-      }
-      if (loc.type === "static") {
-        if (!loc.staticDir?.trim()) return { error: `Static location "${loc.path}" needs a directory path` };
-      }
-      if (loc.type === "redirect") {
-        if (!loc.forwardDomain?.trim()) return { error: `Redirect location "${loc.path}" needs a forward domain` };
-      }
-      if (loc.type === "file") {
-        if (!loc.staticDir?.trim()) return { error: `File location "${loc.path}" needs a file path` };
-      }
-    }
-
-    for (const sp of data.streamPorts) {
-      if (!sp.port || sp.port < 1 || sp.port > 65535) {
-        return { error: "Stream port must be 1-65535" };
-      }
-      if (!sp.upstreams || sp.upstreams.length === 0) {
-        return { error: `Stream port ${sp.port} needs at least one upstream` };
-      }
-    }
-
-    if (data.sslType === "custom" && (!data.sslCertPath || !data.sslKeyPath)) {
-      return { error: "Custom SSL requires both certificate and key paths" };
-    }
+    const validationError = validatePublishData(data);
+    if (validationError) return { error: validationError };
   }
 
   // Load existing host for password preservation

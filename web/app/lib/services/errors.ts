@@ -24,6 +24,15 @@ export class NotFoundError extends Error {
   }
 }
 
+export class HostValidationError extends Error {
+  kind: "input" | "nginx";
+  constructor(message: string, kind: "input" | "nginx" = "input") {
+    super(message);
+    this.name = "HostValidationError";
+    this.kind = kind;
+  }
+}
+
 export function requireScope(auth: AuthContext, scope: Scope): void {
   if (!auth.scopes.includes(scope)) {
     throw new ForbiddenError(scope);
