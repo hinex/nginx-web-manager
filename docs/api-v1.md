@@ -20,9 +20,9 @@ Session cookies (used by the web UI) also work for same-origin requests but are 
 
 ### Authentication order (applied to every request)
 
-1. **mTLS gate** — if `require_mtls` is enabled in settings, the request must carry `X-Client-Verify: SUCCESS` (set by the upstream nginx proxy). Failure returns `401 {"error":"mTLS required","code":"mtls_required"}`. See [docs/mtls.md](mtls.md) for nginx configuration.
-2. **IP whitelist** — if `ip_whitelist` is configured (comma-separated CIDRs/IPs), the client IP must match. Failure returns `403`.
-3. **Rate limiting** — after N failed bearer attempts (default 10, configurable `max_login_attempts`) from an IP, that IP is locked out for 15 minutes (configurable `login_ban_duration_minutes`). Returns `429`.
+1. **mTLS gate** — if `require_mtls` is enabled in settings, the request must carry `X-Client-Verify: SUCCESS` (set by the upstream nginx proxy). Failure returns `401 {"error":"mTLS required","code":"unauthorized"}` (the `requireAuth` wrapper on `/api/v1` routes collapses the inner `mtls_required` code). See [docs/mtls.md](mtls.md) for nginx configuration.
+2. **IP whitelist** — if `ip_whitelist` is configured (comma-separated CIDRs/IPs), the client IP must match. Failure returns `401` with `code: "unauthorized"` (collapsed by the `requireAuth` wrapper).
+3. **Rate limiting** — after N failed bearer attempts (default 10, configurable `max_login_attempts`) from an IP, that IP is locked out for 15 minutes (configurable `login_ban_duration_minutes`). On `/api/v1` routes this surfaces as `401` with `code: "unauthorized"` (collapsed by the `requireAuth` wrapper); the OAuth token endpoint is the exception and returns a genuine `429`.
 4. **Bearer dispatch:**
    - `ngm_` prefix → opaque token verification (constant-time hash compare against DB).
    - `ey….….` (compact JWT) → OAuth2 JWT: signature verified, then liveness re-checked (token row not revoked/expired, user still exists). Effective scopes = `JWT.scp ∩ token.scopes ∩ role_ceiling`.
@@ -161,13 +161,12 @@ Status code table:
 | 400 | `bad_request` | missing required query param or invalid `id` format |
 | 400 | `parse_error` | malformed JSON body |
 | 400 | `input_validation_error` | unknown field, invalid domain, bad array type |
-| 401 | `unauthorized` | missing or invalid bearer token / session |
-| 401 | `mtls_required` | `require_mtls` enabled and `X-Client-Verify` is not `SUCCESS` |
-| 403 | `forbidden_error` | token lacks required scope; or IP whitelist mismatch |
+| 400 | `invalid_path_error` | config file path outside the nginx directory or wrong extension |
+| 401 | `unauthorized` | missing/invalid bearer token or session; also mTLS gate failure (`error: "mTLS required"`), IP whitelist mismatch, and rate-limit lockout — all collapsed to this code by the `requireAuth` wrapper on `/api/v1` routes |
+| 403 | `forbidden_error` | token lacks required scope |
 | 404 | `not_found_error` | host / config file not found |
 | 405 | `method_not_allowed` | wrong HTTP method (response includes `Allow` header) |
 | 422 | `host_validation_error` | host publish failed semantic validation or nginx -t |
-| 429 | (body from rate-limit) | too many failed bearer attempts from this IP |
 | 500 | `internal_error` | unhandled server error |
 
 ---
