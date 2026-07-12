@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  realpathSync,
 } from "fs";
 import { resolve, dirname, join } from "path";
 import type { AuthContext } from "~/lib/auth/authenticate";
@@ -24,6 +25,20 @@ function auditDetails(auth: AuthContext, extra: Record<string, unknown>) {
   return auth.via === "token" ? { ...extra, tokenId: auth.tokenId, via: "token" } : extra;
 }
 
+/**
+ * Walk dirname() upward until we find a path that exists on disk, stopping at
+ * the filesystem root ("/") to prevent an infinite loop.
+ */
+function nearestExistingAncestor(p: string): string {
+  let cur = dirname(p);
+  while (!existsSync(cur)) {
+    const parent = dirname(cur);
+    if (parent === cur) return cur; // reached filesystem root
+    cur = parent;
+  }
+  return cur;
+}
+
 export function resolveConfigPath(
   filePath: string,
   opts: { allowDraft?: boolean } = {}
@@ -33,11 +48,33 @@ export function resolveConfigPath(
   }
   const dir = nginxDir();
   const p = resolve(dir, filePath);
+
+  // Cheap string-containment check first (no syscall).
   if (p !== dir && !p.startsWith(dir + "/")) throw new InvalidPathError(filePath);
+
+  // Extension check before expensive realpath work.
   const isConf = p.endsWith(".conf");
   const isDraft = p.endsWith(".conf" + DRAFT_SUFFIX);
   if (!(isConf || (opts.allowDraft && isDraft))) throw new InvalidPathError(filePath);
-  return p;
+
+  // Realpath containment: resolve symlinks on both the nginx dir and the target
+  // path (or its nearest existing ancestor if the file doesn't exist yet).
+  const realDir = realpathSync(dir);
+  let realTarget: string;
+  if (existsSync(p)) {
+    realTarget = realpathSync(p);
+  } else {
+    const ancestor = nearestExistingAncestor(p);
+    // remainder is the path from the ancestor downward (the not-yet-created portion)
+    const remainder = p.slice(ancestor.length);
+    realTarget = realpathSync(ancestor) + remainder;
+  }
+
+  if (realTarget !== realDir && !realTarget.startsWith(realDir + "/")) {
+    throw new InvalidPathError(filePath);
+  }
+
+  return realTarget;
 }
 
 export function listConfigs(auth: AuthContext): { files: string[]; drafts: string[] } {

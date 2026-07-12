@@ -7,13 +7,15 @@ vi.mock("fs", () => ({
   existsSync: vi.fn(() => false),
   mkdirSync: vi.fn(),
   readdirSync: vi.fn(() => []),
+  // Identity: in tests, paths are already "real" — no symlinks to resolve.
+  realpathSync: vi.fn((p: string) => p),
 }));
 vi.mock("~/lib/config/versions", () => ({ saveVersion: vi.fn() }));
 vi.mock("~/lib/nginx/validator", () => ({ validateNginxConfig: vi.fn(() => ({ valid: true })) }));
 vi.mock("~/lib/nginx/reload", () => ({ reloadNginx: vi.fn(() => true) }));
 vi.mock("~/lib/audit/log", () => ({ logAudit: vi.fn() }));
 
-import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync, realpathSync } from "fs";
 import { saveVersion } from "~/lib/config/versions";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
