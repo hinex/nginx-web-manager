@@ -436,9 +436,10 @@ describe("publishHost — happy path", () => {
 // ─── publishHost — nginx -t failure (row restored) ───────────────────────────
 
 describe("publishHost — nginx -t failure", () => {
-  it("restores row byte-identical, calls generateAllConfigs twice, reload NOT called", async () => {
+  it("restores row byte-identical (full deep-equal), calls generateAllConfigs twice, reload NOT called", async () => {
     const row = await createHost(ctx(["hosts:write"]), { ...validDraft });
-    const snapshotDraft = JSON.stringify(row.draft);
+    // Capture the full pre-publish snapshot
+    const prePublishSnapshot = { ..._store.get(row.id)! };
 
     vi.mocked(validateNginxConfig).mockReturnValue({ valid: false, error: "bad syntax" });
 
@@ -451,9 +452,41 @@ describe("publishHost — nginx -t failure", () => {
     expect(reloadNginx).not.toHaveBeenCalled();
     expect(generateAllConfigs).toHaveBeenCalledTimes(2); // write + restore
 
-    // Row restored — draft should be back
+    // Full-row deep-equal: every column must match the pre-publish snapshot
     const restored = _store.get(row.id)!;
-    expect(JSON.stringify(restored.draft)).toBe(snapshotDraft);
+    expect(restored.domains).toEqual(prePublishSnapshot.domains);
+    expect(restored.groupId).toBe(prePublishSnapshot.groupId);
+    expect(restored.enabled).toBe(prePublishSnapshot.enabled);
+    expect(restored.sslType).toBe(prePublishSnapshot.sslType);
+    expect(restored.sslForceHttps).toBe(prePublishSnapshot.sslForceHttps);
+    expect(restored.sslCertPath).toBe(prePublishSnapshot.sslCertPath);
+    expect(restored.sslKeyPath).toBe(prePublishSnapshot.sslKeyPath);
+    expect(restored.hsts).toBe(prePublishSnapshot.hsts);
+    expect(restored.http2).toBe(prePublishSnapshot.http2);
+    expect(restored.compression).toBe(prePublishSnapshot.compression);
+    expect(restored.redirectWww).toBe(prePublishSnapshot.redirectWww);
+    expect(restored.webhookUrl).toBe(prePublishSnapshot.webhookUrl);
+    expect(restored.advancedNginx).toBe(prePublishSnapshot.advancedNginx);
+    expect(restored.clientMaxBodySize).toBe(prePublishSnapshot.clientMaxBodySize);
+    expect(JSON.stringify(restored.draft)).toBe(JSON.stringify(prePublishSnapshot.draft));
+    expect(JSON.stringify(restored.locations)).toBe(JSON.stringify(prePublishSnapshot.locations));
+    expect(JSON.stringify(restored.streamPorts)).toBe(JSON.stringify(prePublishSnapshot.streamPorts));
+  });
+
+  it("publish with groupId:null in draft clears groupId on live row", async () => {
+    // Create a host that starts with a groupId set
+    const row = await createHost(ctx(["hosts:write"]), { ...validDraft });
+    // Manually set groupId on the live row to simulate a previously assigned group
+    _store.set(row.id, { ..._store.get(row.id)!, groupId: 7 });
+
+    // Update draft to include groupId: null (removing the group)
+    await updateHost(ctx(["hosts:write"]), row.id, { ...validDraft, groupId: null as any });
+
+    vi.mocked(validateNginxConfig).mockReturnValue({ valid: true });
+
+    const published = await publishHost(ctx(["hosts:publish"]), row.id);
+
+    expect(published.groupId).toBeNull();
   });
 
   it("restores and rethrows when validator itself throws (spawn failure)", async () => {
