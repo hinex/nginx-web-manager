@@ -12,7 +12,7 @@
  */
 
 import type { AuthContext } from "~/lib/auth/authenticate";
-import { requireScope, NotFoundError, HostValidationError } from "./errors";
+import { requireScope, NotFoundError, HostValidationError, InputValidationError } from "./errors";
 import { db } from "~/lib/db/connection";
 import { hosts } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -51,22 +51,22 @@ const HOSTNAME_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*
 function validateInputShape(input: Record<string, unknown>): void {
   for (const key of Object.keys(input)) {
     if (!ALLOWED_INPUT_KEYS.has(key)) {
-      throw new Error(`Unknown field: ${key}`);
+      throw new InputValidationError(`Unknown field: ${key}`);
     }
   }
   if (input.domains !== undefined) {
-    if (!Array.isArray(input.domains)) throw new Error("domains must be an array");
+    if (!Array.isArray(input.domains)) throw new InputValidationError("domains must be an array");
     for (const d of input.domains as unknown[]) {
       if (typeof d !== "string" || !HOSTNAME_RE.test(d)) {
-        throw new Error(`Invalid domain: ${d}`);
+        throw new InputValidationError(`Invalid domain: ${d}`);
       }
     }
   }
   if (input.locations !== undefined && !Array.isArray(input.locations)) {
-    throw new Error("locations must be an array");
+    throw new InputValidationError("locations must be an array");
   }
   if (input.streamPorts !== undefined && !Array.isArray(input.streamPorts)) {
-    throw new Error("streamPorts must be an array");
+    throw new InputValidationError("streamPorts must be an array");
   }
 }
 

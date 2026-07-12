@@ -1,15 +1,5 @@
 import { getHost, updateHost, deleteHost } from "~/lib/services/hosts";
-import { requireAuth, parseJsonBody, toResponse, methodNotAllowed } from "./shared";
-
-/** Parse :id as a positive integer. Returns the integer or null on failure. */
-function parsePositiveInt(raw: string | undefined): number | null {
-  if (!raw || raw.trim() === "") return null;
-  // Reject anything that isn't a pure decimal integer string (no decimals, no signs that slip through, no whitespace)
-  if (!/^\d+$/.test(raw.trim())) return null;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
+import { requireAuth, parseJsonBody, toResponse, methodNotAllowed, parsePositiveInt } from "./shared";
 
 function badId(): Response {
   return Response.json(

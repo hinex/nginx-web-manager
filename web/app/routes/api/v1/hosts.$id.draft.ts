@@ -1,14 +1,5 @@
 import { discardHostDraft } from "~/lib/services/hosts";
-import { requireAuth, toResponse, methodNotAllowed } from "./shared";
-
-/** Parse :id as a positive integer. Returns the integer or null on failure. */
-function parsePositiveInt(raw: string | undefined): number | null {
-  if (!raw || raw.trim() === "") return null;
-  if (!/^\d+$/.test(raw.trim())) return null;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return n;
-}
+import { requireAuth, toResponse, methodNotAllowed, parsePositiveInt } from "./shared";
 
 function badId(): Response {
   return Response.json(

@@ -33,6 +33,13 @@ export class HostValidationError extends Error {
   }
 }
 
+export class InputValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InputValidationError";
+  }
+}
+
 export function requireScope(auth: AuthContext, scope: Scope): void {
   if (!auth.scopes.includes(scope)) {
     throw new ForbiddenError(scope);

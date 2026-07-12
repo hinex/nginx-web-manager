@@ -37,7 +37,8 @@ vi.mock("~/lib/auth/tokens", () => ({ verifyApiToken: vi.fn(() => ({ ok: false, 
 
 import { authenticate } from "~/lib/auth/authenticate";
 import * as hostsService from "~/lib/services/hosts";
-import { ForbiddenError, NotFoundError, HostValidationError } from "~/lib/services/errors";
+import { ForbiddenError, NotFoundError, HostValidationError, InputValidationError } from "~/lib/services/errors";
+import { parsePositiveInt } from "./shared";
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
 
@@ -137,6 +138,52 @@ describe("401 without Bearer", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 401 missing — POST /hosts, PATCH /hosts/:id, DELETE /hosts/:id
+// ═══════════════════════════════════════════════════════════════════════════
+describe("401 for mutating routes without Bearer", () => {
+  beforeEach(() => {
+    vi.mocked(authenticate).mockRejectedValue(
+      Response.json({ error: "Authentication required" }, { status: 401 })
+    );
+  });
+
+  it("POST /api/v1/hosts → 401 JSON", async () => {
+    const req = new Request("http://localhost/api/v1/hosts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domains: ["x.com"] }),
+    });
+    const res = await hostsAction({ request: req, params: {} });
+    expect(res.status).toBe(401);
+    assertJson(res);
+    const body = await res.json();
+    expect(body).toHaveProperty("code");
+  });
+
+  it("PATCH /api/v1/hosts/1 → 401 JSON", async () => {
+    const req = new Request("http://localhost/api/v1/hosts/1", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domains: ["x.com"] }),
+    });
+    const res = await hostsIdAction({ request: req, params: { id: "1" } });
+    expect(res.status).toBe(401);
+    assertJson(res);
+    const body = await res.json();
+    expect(body).toHaveProperty("code");
+  });
+
+  it("DELETE /api/v1/hosts/1 → 401 JSON", async () => {
+    const req = new Request("http://localhost/api/v1/hosts/1", { method: "DELETE" });
+    const res = await hostsIdAction({ request: req, params: { id: "1" } });
+    expect(res.status).toBe(401);
+    assertJson(res);
+    const body = await res.json();
+    expect(body).toHaveProperty("code");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 400 on bad :id — many malformed variants
 // ═══════════════════════════════════════════════════════════════════════════
 describe("400 on bad :id", () => {
@@ -181,6 +228,73 @@ describe("400 on bad :id", () => {
       assertJson(res);
     });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 400 InputValidationError — unknown field / bad domain
+// ═══════════════════════════════════════════════════════════════════════════
+describe("400 InputValidationError → {error} (no code)", () => {
+  it("POST /api/v1/hosts with unknown field → 400 with message in error", async () => {
+    vi.mocked(hostsService.createHost).mockRejectedValue(
+      new InputValidationError("Unknown field: labelIds")
+    );
+    const req = makeRequest("POST", "http://localhost/api/v1/hosts", { labelIds: [1] });
+    const res = await hostsAction({ request: req, params: {} });
+    expect(res.status).toBe(400);
+    assertJson(res);
+    const body = await res.json();
+    expect(body.error).toBe("Unknown field: labelIds");
+    // InputValidationError 400 does NOT expose a `code` field
+    expect(body).not.toHaveProperty("code");
+  });
+
+  it("PATCH /api/v1/hosts/:id with unknown field → 400 with message in error", async () => {
+    vi.mocked(hostsService.updateHost).mockRejectedValue(
+      new InputValidationError("Unknown field: foo")
+    );
+    const req = makeRequest("PATCH", "http://localhost/api/v1/hosts/1", { foo: "bar" });
+    const res = await hostsIdAction({ request: req, params: { id: "1" } });
+    expect(res.status).toBe(400);
+    assertJson(res);
+    const body = await res.json();
+    expect(body.error).toBe("Unknown field: foo");
+  });
+
+  it("POST /api/v1/hosts with invalid domain → 400 with message in error", async () => {
+    vi.mocked(hostsService.createHost).mockRejectedValue(
+      new InputValidationError("Invalid domain: not_a_domain!")
+    );
+    const req = makeRequest("POST", "http://localhost/api/v1/hosts", { domains: ["not_a_domain!"] });
+    const res = await hostsAction({ request: req, params: {} });
+    expect(res.status).toBe(400);
+    assertJson(res);
+    const body = await res.json();
+    expect(body.error).toContain("Invalid domain");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// parsePositiveInt — MAX_SAFE_INTEGER boundary
+// ═══════════════════════════════════════════════════════════════════════════
+describe("parsePositiveInt — bounds", () => {
+  it("accepts Number.MAX_SAFE_INTEGER", () => {
+    expect(parsePositiveInt(String(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("rejects a 22-digit integer (> MAX_SAFE_INTEGER) → null", () => {
+    expect(parsePositiveInt("9".repeat(22))).toBeNull();
+  });
+
+  it("rejects 9007199254740992 (MAX_SAFE_INTEGER + 1) → null", () => {
+    expect(parsePositiveInt("9007199254740992")).toBeNull();
+  });
+
+  it("GET /api/v1/hosts/:id with astronomically large id → 400", async () => {
+    const req = makeRequest("GET", "http://localhost/api/v1/hosts/99999999999999999999");
+    const res = await hostsIdLoader({ request: req, params: { id: "99999999999999999999" } });
+    expect(res.status).toBe(400);
+    assertJson(res);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

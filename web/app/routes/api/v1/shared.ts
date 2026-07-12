@@ -4,6 +4,7 @@ import {
   NotFoundError,
   InvalidPathError,
   HostValidationError,
+  InputValidationError,
 } from "~/lib/services/errors";
 
 /** Snake-case the error class name: e.g. "ForbiddenError" → "forbidden_error" */
@@ -34,6 +35,12 @@ export function toResponse(err: unknown): Response {
   if (err instanceof InvalidPathError) {
     return Response.json(
       { error: err.message, code: toCode(err.name) },
+      { status: 400 }
+    );
+  }
+  if (err instanceof InputValidationError) {
+    return Response.json(
+      { error: err.message },
       { status: 400 }
     );
   }
@@ -90,6 +97,19 @@ export async function requireAuth(
     }
     throw err;
   }
+}
+
+/**
+ * Parse a route param as a positive safe integer.
+ * Returns the integer or null on failure.
+ * Rejects: non-decimal, zero, negative, non-integers, values > Number.MAX_SAFE_INTEGER.
+ */
+export function parsePositiveInt(raw: string | undefined): number | null {
+  if (!raw || raw.trim() === "") return null;
+  if (!/^\d+$/.test(raw.trim())) return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0 || n > Number.MAX_SAFE_INTEGER) return null;
+  return n;
 }
 
 /** 405 Method Not Allowed JSON response */
