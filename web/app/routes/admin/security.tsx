@@ -1,6 +1,9 @@
 import type { Route } from "./+types/security";
 import { useState, useEffect, useCallback } from "react";
 import { requireAuth } from "~/lib/auth/middleware";
+import { ApiTokensCard } from "~/components/security/ApiTokensCard";
+import { McpEndpointCard } from "~/components/security/McpEndpointCard";
+import type { Role } from "~/lib/auth/scopes";
 import { db } from "~/lib/db/connection";
 import { userTotpSecrets, userWebauthnCredentials, userRecoveryCodes } from "~/lib/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -73,11 +76,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     totpEnabled: totp?.verified ?? false,
     passkeys,
     recoveryCodesRemaining,
+    role: user.role,
   };
 }
 
 export default function SecurityPage({ loaderData }: Route.ComponentProps) {
-  const { totpEnabled, passkeys, recoveryCodesRemaining } = loaderData;
+  const { totpEnabled, passkeys, recoveryCodesRemaining, role } = loaderData;
 
   return (
     <div>
@@ -90,6 +94,8 @@ export default function SecurityPage({ loaderData }: Route.ComponentProps) {
         <TotpSection enabled={totpEnabled} />
         <WebAuthnSection passkeys={passkeys} />
         <RecoveryCodesSection remaining={recoveryCodesRemaining} />
+        <ApiTokensCard role={role as Role} />
+        {role === "admin" && <McpEndpointCard />}
       </div>
     </div>
   );

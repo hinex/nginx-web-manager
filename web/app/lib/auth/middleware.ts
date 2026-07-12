@@ -35,7 +35,7 @@ function ipToNum(ip: string): number {
   return ip.split(".").reduce((acc, oct) => (acc << 8) + parseInt(oct), 0) >>> 0;
 }
 
-async function checkIpWhitelist(request: Request) {
+export async function checkIpWhitelist(request: Request) {
   const row = db
     .select()
     .from(settings)
