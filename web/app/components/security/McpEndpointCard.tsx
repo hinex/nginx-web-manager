@@ -134,7 +134,9 @@ export function McpEndpointCard() {
                 When enabled, every API and MCP request must carry{" "}
                 <code className="rounded bg-muted px-1">X-Client-Verify: SUCCESS</code>{" "}
                 — only effective when nginx is configured to set and overwrite this
-                header (see <a href="/docs/mtls.md" className="underline">docs/mtls.md</a>).
+                header (see{" "}
+                <code className="rounded bg-muted px-1">docs/mtls.md</code> in the
+                repository).
                 Enabling this without the correct proxy configuration will lock out all
                 API clients.
               </p>

@@ -67,12 +67,23 @@ export async function checkIpWhitelist(request: Request) {
  * any client can spoof the header. See docs/mtls.md.
  */
 export async function checkMtls(request: Request): Promise<void> {
-  const row = db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, "require_mtls"))
-    .get();
-  if (row?.value !== "true") return; // flag off or absent — no-op
+  // Fail-closed by explicit decision: if the settings read throws we cannot
+  // prove the gate is disabled, so deny rather than silently skip the check.
+  let required: boolean;
+  try {
+    const row = db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, "require_mtls"))
+      .get();
+    required = row?.value === "true";
+  } catch {
+    throw Response.json(
+      { error: "mTLS required", code: "mtls_required" },
+      { status: 401 }
+    );
+  }
+  if (!required) return; // flag off or absent — no-op
 
   if (request.headers.get("x-client-verify") !== "SUCCESS") {
     throw Response.json(

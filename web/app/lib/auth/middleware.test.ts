@@ -23,6 +23,7 @@ vi.mock("~/lib/db/schema", () => ({
 }));
 
 import { checkMtls } from "./middleware";
+import { db } from "~/lib/db/connection";
 
 function makeRequest(headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/api/mcp", { headers });
@@ -113,6 +114,25 @@ describe("checkMtls — flag on, header missing or wrong", () => {
       throw new Error("expected throw");
     } catch (err) {
       expect((err as Response).status).toBe(401);
+    }
+  });
+});
+
+// ── fail-closed on settings read error ─────────────────────────────────────
+
+describe("checkMtls — settings read failure", () => {
+  it("fails closed (401) even with SUCCESS header when the settings read throws", async () => {
+    vi.mocked((db as any).get).mockImplementationOnce(() => {
+      throw new Error("db unavailable");
+    });
+    try {
+      await checkMtls(makeRequest({ "x-client-verify": "SUCCESS" }));
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Response);
+      expect((err as Response).status).toBe(401);
+      const body = await (err as Response).json();
+      expect(body.code).toBe("mtls_required");
     }
   });
 });
