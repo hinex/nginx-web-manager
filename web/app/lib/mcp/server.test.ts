@@ -12,10 +12,19 @@ vi.mock("~/lib/services/nginx", () => ({
   reload: vi.fn(() => ({ reloaded: true })),
 }));
 vi.mock("~/lib/services/stats", () => ({ getStats: vi.fn(() => ({ cpu: 1 })) }));
-vi.mock("~/lib/services/hosts", () => ({ listHosts: vi.fn(() => []) }));
+vi.mock("~/lib/services/hosts", () => ({
+  listHosts: vi.fn(() => []),
+  getHost: vi.fn(() => ({ id: 1, domains: ["example.com"] })),
+  createHost: vi.fn(async () => ({ id: 2, domains: ["new.example.com"], draft: { domains: ["new.example.com"] } })),
+  updateHost: vi.fn(async () => ({ id: 1, domains: ["example.com"], draft: { domains: ["updated.example.com"] } })),
+  discardHostDraft: vi.fn(() => ({ id: 1, domains: ["example.com"], draft: null })),
+  publishHost: vi.fn(async () => ({ id: 1, domains: ["example.com"], draft: null })),
+  deleteHost: vi.fn(async () => ({ deleted: true })),
+}));
 
 import * as configsService from "~/lib/services/configs";
-import { ForbiddenError } from "~/lib/services/errors";
+import * as hostsService from "~/lib/services/hosts";
+import { ForbiddenError, HostValidationError } from "~/lib/services/errors";
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
 import {
@@ -42,18 +51,30 @@ beforeEach(() => {
   vi.mocked(configsService.writeConfigDraft).mockReturnValue({ draftPath: "/data/nginx/a.conf.draft", valid: true });
   vi.mocked(configsService.publishConfig).mockReturnValue({ published: true, valid: true });
   vi.mocked(configsService.deleteConfig).mockReturnValue({ deleted: true });
+  vi.mocked(hostsService.getHost).mockReturnValue({ id: 1, domains: ["example.com"] } as any);
+  vi.mocked(hostsService.createHost).mockResolvedValue({ id: 2, domains: ["new.example.com"], draft: { domains: ["new.example.com"] } } as any);
+  vi.mocked(hostsService.updateHost).mockResolvedValue({ id: 1, domains: ["example.com"], draft: { domains: ["updated.example.com"] } } as any);
+  vi.mocked(hostsService.discardHostDraft).mockReturnValue({ id: 1, domains: ["example.com"], draft: null } as any);
+  vi.mocked(hostsService.publishHost).mockResolvedValue({ id: 1, domains: ["example.com"], draft: null } as any);
+  vi.mocked(hostsService.deleteHost).mockResolvedValue({ deleted: true } as any);
 });
 
 describe("tool definitions", () => {
-  it("defines 9 tools, all with a requiredScope", () => {
+  it("defines 15 tools, all with a requiredScope", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "create_host",
       "delete_config",
+      "delete_host",
+      "discard_host_draft",
+      "get_host",
       "get_stats",
       "list_configs",
       "list_hosts",
       "publish_config",
+      "publish_host",
       "read_config",
       "reload_nginx",
+      "update_host",
       "validate_config",
       "write_config",
     ]);
@@ -71,6 +92,16 @@ describe("toolsForScopes", () => {
   it("publish_config and delete_config require configs:publish", () => {
     const names = toolsForScopes(["configs:publish"]).map((t) => t.name).sort();
     expect(names).toEqual(["delete_config", "publish_config"]);
+  });
+
+  it("hosts:write exposes create_host, update_host, discard_host_draft", () => {
+    const names = toolsForScopes(["hosts:write"]).map((t) => t.name).sort();
+    expect(names).toEqual(["create_host", "discard_host_draft", "update_host"]);
+  });
+
+  it("hosts:publish exposes publish_host and delete_host", () => {
+    const names = toolsForScopes(["hosts:publish"]).map((t) => t.name).sort();
+    expect(names).toEqual(["delete_host", "publish_host"]);
   });
 });
 
@@ -110,6 +141,68 @@ describe("handleToolCall", () => {
     const r = await handleToolCall(ctx(["configs:publish"]), "publish_config", { path: "a.conf" });
     expect(configsService.publishConfig).toHaveBeenCalled();
     expect(r.content[0].text).toContain("published");
+  });
+
+  it("get_host delegates to service and returns host JSON", async () => {
+    const r = await handleToolCall(ctx(["hosts:read"]), "get_host", { id: 1 });
+    expect(hostsService.getHost).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain("example.com");
+  });
+
+  it("create_host delegates to service with host object", async () => {
+    const host = { domains: ["new.example.com"] };
+    const r = await handleToolCall(ctx(["hosts:write"]), "create_host", { host });
+    expect(hostsService.createHost).toHaveBeenCalledWith(expect.anything(), host);
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain("new.example.com");
+  });
+
+  it("update_host delegates to service with id and patch", async () => {
+    const patch = { domains: ["updated.example.com"] };
+    const r = await handleToolCall(ctx(["hosts:write"]), "update_host", { id: 1, patch });
+    expect(hostsService.updateHost).toHaveBeenCalledWith(expect.anything(), 1, patch);
+    expect(r.isError).toBeUndefined();
+  });
+
+  it("discard_host_draft delegates to service", async () => {
+    const r = await handleToolCall(ctx(["hosts:write"]), "discard_host_draft", { id: 1 });
+    expect(hostsService.discardHostDraft).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain("discarded");
+  });
+
+  it("publish_host delegates to service and reports nginx reload", async () => {
+    const r = await handleToolCall(ctx(["hosts:publish"]), "publish_host", { id: 1 });
+    expect(hostsService.publishHost).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain("nginx reloaded");
+  });
+
+  it("delete_host delegates to service", async () => {
+    const r = await handleToolCall(ctx(["hosts:publish"]), "delete_host", { id: 1 });
+    expect(hostsService.deleteHost).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain("deleted");
+  });
+
+  it("maps HostValidationError (nginx kind) to isError result with stderr and rollback note", async () => {
+    vi.mocked(hostsService.publishHost).mockRejectedValue(
+      new HostValidationError("upstream not found", "nginx")
+    );
+    const r = await handleToolCall(ctx(["hosts:publish"]), "publish_host", { id: 1 });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("upstream not found");
+    expect(r.content[0].text).toContain("rolled back");
+  });
+
+  it("maps HostValidationError (input kind) to isError result with message", async () => {
+    vi.mocked(hostsService.createHost).mockRejectedValue(
+      new HostValidationError("domains is required", "input")
+    );
+    const r = await handleToolCall(ctx(["hosts:write"]), "create_host", { host: {} });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain("domains is required");
   });
 });
 

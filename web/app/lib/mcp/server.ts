@@ -1,6 +1,6 @@
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
-import { ForbiddenError, InvalidPathError, NotFoundError } from "~/lib/services/errors";
+import { ForbiddenError, HostValidationError, InvalidPathError, NotFoundError } from "~/lib/services/errors";
 import * as configsService from "~/lib/services/configs";
 import * as nginxService from "~/lib/services/nginx";
 import * as statsService from "~/lib/services/stats";
@@ -106,6 +106,81 @@ export const tools: McpTool[] = [
     description: "List all managed proxy hosts",
     inputSchema: NO_ARGS,
   },
+  {
+    name: "get_host",
+    requiredScope: "hosts:read",
+    description: "Get a single proxy host by ID",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "integer", description: "Host ID" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "create_host",
+    requiredScope: "hosts:write",
+    description:
+      "Create a new proxy host as a draft. The draft must be published (publish_host) before nginx is affected.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        host: {
+          type: "object",
+          description: "Host fields (domains, locations, sslType, etc.)",
+        },
+      },
+      required: ["host"],
+    },
+  },
+  {
+    name: "update_host",
+    requiredScope: "hosts:write",
+    description:
+      "Update a proxy host's fields as a draft. Changes are merged into the existing draft or live state. To apply: publish_host.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "integer", description: "Host ID" },
+        patch: {
+          type: "object",
+          description: "Fields to update (domains, locations, sslType, etc.)",
+        },
+      },
+      required: ["id", "patch"],
+    },
+  },
+  {
+    name: "discard_host_draft",
+    requiredScope: "hosts:write",
+    description: "Discard the pending draft for a host, reverting to the last published state.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "integer", description: "Host ID" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "publish_host",
+    requiredScope: "hosts:publish",
+    description:
+      "Publish a host draft: applies changes, validates nginx config, reloads nginx. Rolls back automatically if validation fails.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "integer", description: "Host ID" } },
+      required: ["id"],
+    },
+  },
+  {
+    name: "delete_host",
+    requiredScope: "hosts:publish",
+    description:
+      "Delete a proxy host: removes config files, validates nginx, reloads. Rolls back automatically if validation fails.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "integer", description: "Host ID" } },
+      required: ["id"],
+    },
+  },
 ];
 
 export function toolsForScopes(scopes: Scope[]) {
@@ -189,6 +264,28 @@ export async function handleToolCall(
         return textResult(statsService.getStats(auth));
       case "list_hosts":
         return textResult(hostsService.listHosts(auth));
+      case "get_host":
+        return textResult(hostsService.getHost(auth, Number(args.id)));
+      case "create_host": {
+        const row = await hostsService.createHost(auth, args.host as Record<string, unknown>);
+        return textResult(row);
+      }
+      case "update_host": {
+        const row = await hostsService.updateHost(auth, Number(args.id), args.patch as Record<string, unknown>);
+        return textResult(row);
+      }
+      case "discard_host_draft": {
+        hostsService.discardHostDraft(auth, Number(args.id));
+        return textResult(`Host ${args.id} draft discarded`);
+      }
+      case "publish_host": {
+        await hostsService.publishHost(auth, Number(args.id));
+        return textResult("Host published and nginx reloaded");
+      }
+      case "delete_host": {
+        await hostsService.deleteHost(auth, Number(args.id));
+        return textResult(`Host ${args.id} deleted`);
+      }
       default:
         return errorResult(`Unknown tool: ${name}`);
     }
@@ -196,6 +293,10 @@ export async function handleToolCall(
     if (err instanceof ForbiddenError) return errorResult(err.message);
     if (err instanceof InvalidPathError) return errorResult(err.message);
     if (err instanceof NotFoundError) return errorResult(err.message);
+    if (err instanceof HostValidationError) {
+      const note = err.kind === "nginx" ? " State was rolled back." : "";
+      return errorResult(`${err.message}${note}`);
+    }
     return errorResult(`Error: ${(err as Error).message}`);
   }
 }
