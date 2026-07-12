@@ -41,7 +41,9 @@ export async function verifyToken(
   token: string
 ): Promise<TokenPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, JWT_SECRET, {
+      algorithms: ["HS256"],
+    });
     return payload as TokenPayload;
   } catch {
     return null;
@@ -83,7 +85,9 @@ export async function verifyOAuthToken(
   token: string
 ): Promise<OAuthTokenPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, JWT_SECRET, {
+      algorithms: ["HS256"],
+    });
     const p = payload as OAuthTokenPayload;
     // Must have typ === "oauth" — reject session JWTs
     if (p.typ !== "oauth") return null;

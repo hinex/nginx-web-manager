@@ -348,17 +348,23 @@ describe("revoked token liveness", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe("expired JWT", () => {
   it("authenticate() rejects an expired JWT", async () => {
-    // We can't actually wait 15 min; simulate via a JWT with past expiry.
-    // Import createOAuthToken directly and forge a past-expiry token.
-    const { createOAuthToken } = await import("~/lib/auth/jwt.server");
-    // We can't easily create a token with past expiry through the normal API
-    // since jose validates the expiry at sign time. Instead test with a
-    // forged malformed JWT that fails jwtVerify — cover the branch via
-    // a clearly invalid token string.
-    const fakeJwt = "eyJhbGciOiJIUzI1NiJ9.eyJ0eXAiOiJvYXV0aCIsInRpZCI6NDIsInNjcCI6W10sInN1YiI6IjciLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDAwMH0.invalidsignature";
+    // Sign a genuinely expired JWT (past exp) with the real secret so this
+    // exercises jose's ERR_JWT_EXPIRED path, not the bad-signature path.
+    const { SignJWT } = await import("jose");
+    const { getJwtSecret } = await import("~/lib/auth/jwt.server");
+    const expiredJwt = await new SignJWT({
+      sub: "7",
+      tid: 42,
+      scp: ["configs:read"],
+      typ: "oauth",
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
+      .sign(getJwtSecret());
     dbGetResponses = [];
     const authReq = new Request("http://localhost/api/test", {
-      headers: { Authorization: `Bearer ${fakeJwt}` },
+      headers: { Authorization: `Bearer ${expiredJwt}` },
     });
     let threw = false;
     try {

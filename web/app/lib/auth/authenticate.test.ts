@@ -159,6 +159,7 @@ describe("authenticate — JWT OAuth bearer path", () => {
     dbGetResponses = [undefined]; // no row found
     dbGetCallCount = 0;
     await expectStatus(authenticate(req({ Authorization: `Bearer ${token}` })), 401);
+    expect(recordFailedAttempt).toHaveBeenCalled();
   });
 
   it("rejects JWT when user no longer exists", async () => {
