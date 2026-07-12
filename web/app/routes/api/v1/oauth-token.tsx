@@ -5,7 +5,7 @@
  * Credentials: client_id = "ngm-{api_tokens.id}", client_secret = raw ngm_… token.
  * Issues a short-lived JWT (15 min) bearing sub/tid/scp/typ claims.
  *
- * All responses carry Cache-Control: no-store (RFC 6749 §5.1).
+ * All responses carry Cache-Control: no-store + Pragma: no-cache (RFC 6749 §5.1).
  */
 
 import { eq } from "drizzle-orm";
@@ -17,20 +17,21 @@ import { verifyApiToken } from "~/lib/auth/tokens";
 import { createOAuthToken, OAUTH_JWT_TTL_S } from "~/lib/auth/jwt.server";
 import { intersectScopes, type Scope } from "~/lib/auth/scopes";
 
-const NO_STORE = "no-store";
+/** RFC 6749 §5.1: token endpoint responses MUST NOT be cached. */
+const NO_CACHE_HEADERS = {
+  "Cache-Control": "no-store",
+  Pragma: "no-cache",
+} as const;
 
 function oauthError(code: string, status: number): Response {
-  return Response.json(
-    { error: code },
-    { status, headers: { "Cache-Control": NO_STORE } }
-  );
+  return Response.json({ error: code }, { status, headers: NO_CACHE_HEADERS });
 }
 
 export async function loader({ request }: { request: Request }): Promise<Response> {
   if (request.method !== "POST") {
     return Response.json(
       { error: "method_not_allowed" },
-      { status: 405, headers: { Allow: "POST", "Cache-Control": NO_STORE } }
+      { status: 405, headers: { Allow: "POST", ...NO_CACHE_HEADERS } }
     );
   }
   return action({ request });
@@ -40,7 +41,7 @@ export async function action({ request }: { request: Request }): Promise<Respons
   if (request.method !== "POST") {
     return Response.json(
       { error: "method_not_allowed" },
-      { status: 405, headers: { Allow: "POST", "Cache-Control": NO_STORE } }
+      { status: 405, headers: { Allow: "POST", ...NO_CACHE_HEADERS } }
     );
   }
 
@@ -50,7 +51,7 @@ export async function action({ request }: { request: Request }): Promise<Respons
   } catch {
     return Response.json(
       { error: "access_denied" },
-      { status: 401, headers: { "Cache-Control": NO_STORE } }
+      { status: 401, headers: NO_CACHE_HEADERS }
     );
   }
 
@@ -60,7 +61,7 @@ export async function action({ request }: { request: Request }): Promise<Respons
   } catch {
     return Response.json(
       { error: "access_denied" },
-      { status: 403, headers: { "Cache-Control": NO_STORE } }
+      { status: 403, headers: NO_CACHE_HEADERS }
     );
   }
 
@@ -69,7 +70,7 @@ export async function action({ request }: { request: Request }): Promise<Respons
   if (!rate.allowed) {
     return Response.json(
       { error: "too_many_requests" },
-      { status: 429, headers: { "Cache-Control": NO_STORE } }
+      { status: 429, headers: NO_CACHE_HEADERS }
     );
   }
 
@@ -162,6 +163,6 @@ export async function action({ request }: { request: Request }): Promise<Respons
       expires_in: OAUTH_JWT_TTL_S,
       scope: granted.join(" "),
     },
-    { status: 200, headers: { "Cache-Control": NO_STORE } }
+    { status: 200, headers: NO_CACHE_HEADERS }
   );
 }

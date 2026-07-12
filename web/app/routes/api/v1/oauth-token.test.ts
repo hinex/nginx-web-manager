@@ -152,11 +152,12 @@ describe("POST /api/v1/oauth/token — happy path", () => {
     expect(body.access_token).toMatch(/^ey[\w-]+\.[\w-]+\.[\w-]+$/);
   });
 
-  it("response carries Cache-Control: no-store", async () => {
+  it("response carries Cache-Control: no-store and Pragma: no-cache (RFC 6749 §5.1)", async () => {
     setupHappyPath();
     const req = makeFormRequest(defaultParams());
     const res = await action({ request: req });
     expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("pragma")).toBe("no-cache");
   });
 
   it("granted scope matches effective intersection of token scopes ∩ role ceiling", async () => {
@@ -468,6 +469,7 @@ describe("content-type enforcement", () => {
     const res = await action({ request: req });
     expect(res.status).toBe(415);
     expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("pragma")).toBe("no-cache");
     expect((await res.json()).error).toBe("unsupported_media_type");
   });
 
@@ -478,6 +480,20 @@ describe("content-type enforcement", () => {
     });
     const res = await action({ request: req });
     expect(res.status).toBe(415);
+  });
+
+  it("accepts Content-Type with charset suffix", async () => {
+    setupHappyPath();
+    const req = new Request("http://localhost/api/v1/oauth/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      },
+      body: new URLSearchParams(defaultParams()).toString(),
+    });
+    const res = await action({ request: req });
+    expect(res.status).toBe(200);
+    expect((await res.json()).token_type).toBe("Bearer");
   });
 });
 
