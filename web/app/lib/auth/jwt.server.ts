@@ -47,3 +47,48 @@ export async function verifyToken(
     return null;
   }
 }
+
+/** OAuth2 client_credentials JWT — TTL 15 min */
+export interface OAuthTokenPayload extends JWTPayload {
+  /** subject = userId (string per JWT spec, we store as number) */
+  sub: string;
+  /** api_tokens.id */
+  tid: number;
+  /** granted scopes */
+  scp: string[];
+  /** discriminator so session JWTs can't be used as bearer */
+  typ: "oauth";
+}
+
+export const OAUTH_JWT_TTL_S = 900; // 15 minutes
+
+export async function createOAuthToken(payload: {
+  userId: number;
+  tokenId: number;
+  scopes: string[];
+}): Promise<string> {
+  return new SignJWT({
+    sub: String(payload.userId),
+    tid: payload.tokenId,
+    scp: payload.scopes,
+    typ: "oauth" as const,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${OAUTH_JWT_TTL_S}s`)
+    .sign(JWT_SECRET);
+}
+
+export async function verifyOAuthToken(
+  token: string
+): Promise<OAuthTokenPayload | null> {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const p = payload as OAuthTokenPayload;
+    // Must have typ === "oauth" — reject session JWTs
+    if (p.typ !== "oauth") return null;
+    return p;
+  } catch {
+    return null;
+  }
+}

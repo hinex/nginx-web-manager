@@ -14,13 +14,25 @@ vi.mock("./tokens", () => ({
 vi.mock("./session.server", () => ({
   getSessionUser: vi.fn(async () => null),
 }));
+
+// db mock: supports sequential get() responses via a call-count queue
+let dbGetResponses: Array<unknown> = [];
+let dbGetCallCount = 0;
+
 vi.mock("~/lib/db/connection", () => {
   const chain: Record<string, any> = {};
   for (const m of ["select", "from", "where"]) chain[m] = vi.fn(() => chain);
-  chain.get = vi.fn();
+  chain.get = vi.fn(() => {
+    const resp = dbGetResponses[dbGetCallCount];
+    dbGetCallCount++;
+    return resp;
+  });
   return { db: chain };
 });
-vi.mock("~/lib/db/schema", () => ({ users: { id: "id" } }));
+vi.mock("~/lib/db/schema", () => ({
+  users: { id: "id" },
+  apiTokens: { id: "id", userId: "user_id" },
+}));
 
 import { db } from "~/lib/db/connection";
 import { verifyApiToken } from "./tokens";
@@ -48,9 +60,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(checkRateLimit).mockReturnValue({ allowed: true });
   vi.mocked(getSessionUser).mockResolvedValue(null);
+  dbGetCallCount = 0;
+  dbGetResponses = [];
 });
 
-describe("authenticate — bearer path", () => {
+// ── opaque ngm_ token tests ────────────────────────────────────────────────
+
+describe("authenticate — bearer path (opaque ngm_ tokens)", () => {
   it("returns token context with scopes intersected against current role", async () => {
     vi.mocked(verifyApiToken).mockReturnValue({
       ok: true,
@@ -58,7 +74,8 @@ describe("authenticate — bearer path", () => {
       userId: 3,
       scopes: ["configs:read", "configs:write"],
     });
-    mockDb.get.mockReturnValue({ id: 3, role: "viewer" });
+    // opaque path: single db.get() for users
+    dbGetResponses = [{ id: 3, role: "viewer" }];
     const ctx = await authenticate(req({ Authorization: "Bearer ngm_abc" }));
     expect(ctx).toEqual({
       userId: 3,
@@ -77,7 +94,7 @@ describe("authenticate — bearer path", () => {
 
   it("401 when token user no longer exists", async () => {
     vi.mocked(verifyApiToken).mockReturnValue({ ok: true, tokenId: 7, userId: 3, scopes: [] });
-    mockDb.get.mockReturnValue(undefined);
+    dbGetResponses = [undefined]; // user not found
     await expectStatus(authenticate(req({ Authorization: "Bearer ngm_abc" })), 401);
   });
 
@@ -87,6 +104,100 @@ describe("authenticate — bearer path", () => {
     expect(verifyApiToken).not.toHaveBeenCalled();
   });
 });
+
+// ── JWT OAuth bearer tests ─────────────────────────────────────────────────
+
+describe("authenticate — JWT OAuth bearer path", () => {
+  const mockTokenRow = {
+    id: 42,
+    userId: 7,
+    name: "tok",
+    tokenHash: "x",
+    scopes: ["configs:read", "stats:read"],
+    expiresAt: null as Date | null,
+    revokedAt: null as Date | null,
+    lastUsedAt: null,
+    createdAt: new Date(),
+  };
+  const mockUser = { id: 7, email: "u@t.com", role: "editor" };
+
+  async function issueJwt(scopes = ["configs:read", "stats:read"]): Promise<string> {
+    const { createOAuthToken } = await import("./jwt.server");
+    return createOAuthToken({ userId: 7, tokenId: 42, scopes });
+  }
+
+  it("accepts a valid OAuth JWT and returns correct AuthContext", async () => {
+    const token = await issueJwt();
+    dbGetResponses = [{ ...mockTokenRow }, { ...mockUser }];
+    dbGetCallCount = 0;
+    const ctx = await authenticate(req({ Authorization: `Bearer ${token}` }));
+    expect(ctx.via).toBe("token");
+    expect(ctx.userId).toBe(7);
+    expect(ctx.tokenId).toBe(42);
+    expect(ctx.scopes).toContain("configs:read");
+    expect(ctx.scopes).toContain("stats:read");
+  });
+
+  it("rejects JWT when backing token row is revoked (liveness)", async () => {
+    const token = await issueJwt();
+    dbGetResponses = [{ ...mockTokenRow, revokedAt: new Date() }];
+    dbGetCallCount = 0;
+    await expectStatus(authenticate(req({ Authorization: `Bearer ${token}` })), 401);
+    expect(recordFailedAttempt).toHaveBeenCalled();
+  });
+
+  it("rejects JWT when backing token row is expired (liveness)", async () => {
+    const token = await issueJwt();
+    dbGetResponses = [{ ...mockTokenRow, expiresAt: new Date(Date.now() - 1000) }];
+    dbGetCallCount = 0;
+    await expectStatus(authenticate(req({ Authorization: `Bearer ${token}` })), 401);
+    expect(recordFailedAttempt).toHaveBeenCalled();
+  });
+
+  it("rejects JWT when backing token row is missing (liveness)", async () => {
+    const token = await issueJwt();
+    dbGetResponses = [undefined]; // no row found
+    dbGetCallCount = 0;
+    await expectStatus(authenticate(req({ Authorization: `Bearer ${token}` })), 401);
+  });
+
+  it("rejects JWT when user no longer exists", async () => {
+    const token = await issueJwt();
+    dbGetResponses = [{ ...mockTokenRow }, undefined]; // row ok, user gone
+    dbGetCallCount = 0;
+    await expectStatus(authenticate(req({ Authorization: `Bearer ${token}` })), 401);
+    expect(recordFailedAttempt).toHaveBeenCalled();
+  });
+
+  it("rejects session JWT (no typ=oauth)", async () => {
+    const { createToken } = await import("./jwt.server");
+    const sessionJwt = await createToken({ userId: 7, email: "u@t.com", role: "editor" });
+    dbGetResponses = [];
+    await expectStatus(authenticate(req({ Authorization: `Bearer ${sessionJwt}` })), 401);
+  });
+
+  it("rejects malformed JWT (bad signature)", async () => {
+    const malformed = "eyJhbGciOiJIUzI1NiJ9.eyJ0eXAiOiJvYXV0aCJ9.badsig";
+    dbGetResponses = [];
+    await expectStatus(authenticate(req({ Authorization: `Bearer ${malformed}` })), 401);
+  });
+
+  it("intersects JWT scp with current token row scopes AND role ceiling", async () => {
+    // JWT was issued with configs:write but token row was modified to only have configs:read
+    const token = await issueJwt(["configs:read", "configs:write"]);
+    dbGetResponses = [
+      { ...mockTokenRow, scopes: ["configs:read"] }, // row no longer has configs:write
+      { ...mockUser, role: "editor" },
+    ];
+    dbGetCallCount = 0;
+    const ctx = await authenticate(req({ Authorization: `Bearer ${token}` }));
+    // configs:write was in JWT but not in row — should be excluded
+    expect(ctx.scopes).toContain("configs:read");
+    expect(ctx.scopes).not.toContain("configs:write");
+  });
+});
+
+// ── session path ───────────────────────────────────────────────────────────
 
 describe("authenticate — session path", () => {
   it("returns full role ceiling for session user", async () => {

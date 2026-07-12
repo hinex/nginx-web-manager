@@ -35,6 +35,7 @@ export default [
   route("api/v1/hosts/:id", "./routes/api/v1/hosts.$id.ts"),
   route("api/v1/hosts/:id/draft", "./routes/api/v1/hosts.$id.draft.ts"),
   route("api/v1/hosts/:id/publish", "./routes/api/v1/hosts.$id.publish.ts"),
+  route("api/v1/oauth/token", "./routes/api/v1/oauth-token.tsx"),
 
   layout("./routes/admin/layout.tsx", [
     ...prefix("admin", [
