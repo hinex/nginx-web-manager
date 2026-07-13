@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-07-13
+
+### Added
+
+- App version badge in the admin sidebar (desktop and mobile), sourced from `package.json`.
+
+### Changed
+
+- **Optimistic page transitions** — navigating between admin pages now instantly swaps in a
+  skeleton placeholder while the next page's data is loading, instead of freezing on the old page.
+- Thin animated loading bar in the admin header during any in-flight navigation.
+- Sidebar nav highlights the pending destination immediately on click and prefetches page data
+  on hover (`prefetch="intent"`), making transitions noticeably faster.
+
 ## [1.1.0] - 2026-07-13
 
 ### Added
@@ -64,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.1.1]: https://github.com/hardskilled/nginx-manager/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/hardskilled/nginx-manager/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/hardskilled/nginx-manager/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/hardskilled/nginx-manager/releases/tag/v1.0.0
