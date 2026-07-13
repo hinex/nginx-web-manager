@@ -1,7 +1,15 @@
-import { Outlet, redirect, Link, useFetcher } from "react-router";
+import {
+  Outlet,
+  redirect,
+  Link,
+  useFetcher,
+  useNavigation,
+  useLocation,
+} from "react-router";
 import type { Route } from "./+types/layout";
 import { getSessionUser } from "~/lib/auth/session.server";
 import { Sidebar, MobileSidebar } from "~/components/Sidebar";
+import { PageSkeleton } from "~/components/PageSkeleton";
 import { useUIStore } from "~/store/ui";
 import { TooltipProvider } from "~/components/ui/tooltip";
 import { Button } from "~/components/ui/button";
@@ -30,6 +38,16 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const logoutFetcher = useFetcher();
+  const navigation = useNavigation();
+  const location = useLocation();
+
+  // Optimistic page transition: as soon as the user clicks a link to another
+  // page, swap the outlet for a skeleton instead of freezing on the old page
+  // while the next loader is running.
+  const isPageTransition =
+    navigation.state === "loading" &&
+    navigation.location != null &&
+    navigation.location.pathname !== location.pathname;
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -43,7 +61,12 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
             sidebarOpen ? "md:ml-64" : "md:ml-16"
           }`}
         >
-          <header className="backdrop-blur-xl bg-background/80 border-b border-border/50 h-14 flex items-center justify-between px-4 sticky top-0 z-20">
+          <header className="relative backdrop-blur-xl bg-background/80 border-b border-border/50 h-14 flex items-center justify-between px-4 sticky top-0 z-20">
+            {navigation.state !== "idle" && (
+              <div className="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 overflow-hidden">
+                <div className="loading-bar h-full w-1/3 rounded-full bg-primary" />
+              </div>
+            )}
             <div className="flex items-center">
               <div className="md:hidden">
                 <MobileSidebar />
@@ -95,7 +118,7 @@ export default function AdminLayout({ loaderData }: Route.ComponentProps) {
           </header>
 
           <main className="flex-1 overflow-y-auto p-4 md:p-8">
-            <Outlet />
+            {isPageTransition ? <PageSkeleton /> : <Outlet />}
           </main>
         </div>
       </div>

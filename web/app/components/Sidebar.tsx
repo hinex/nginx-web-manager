@@ -1,4 +1,5 @@
-import { NavLink } from "react-router";
+import { NavLink, useNavigation } from "react-router";
+import pkg from "../../package.json";
 import {
   LayoutDashboard,
   Globe,
@@ -107,16 +108,27 @@ function NavItemLink({
   onClick?: () => void;
 }) {
   const Icon = item.icon;
+  const navigation = useNavigation();
+
+  // Optimistic highlight: while a navigation is in flight, light up the
+  // destination item immediately instead of waiting for the loader.
+  const pendingPath = navigation.location?.pathname;
+  const isPendingTarget =
+    pendingPath != null &&
+    (item.end
+      ? pendingPath === item.to
+      : pendingPath === item.to || pendingPath.startsWith(item.to + "/"));
 
   const link = (
     <NavLink
       to={item.to}
       end={item.end}
+      prefetch="intent"
       onClick={onClick}
       className={({ isActive }) =>
         cn(
           "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150",
-          isActive
+          (pendingPath ? isPendingTarget : isActive)
             ? "bg-gradient-to-r from-primary/90 to-primary/70 text-white shadow-sm shadow-primary/25"
             : "text-sidebar-foreground hover:bg-sidebar-accent/80 hover:translate-x-0.5 transition-all duration-150",
           collapsed && "justify-center px-0"
@@ -274,9 +286,24 @@ export function Sidebar() {
         </div>
         <div className="border-t border-sidebar-border px-3 py-2">
           <ThemeToggle collapsed={collapsed} />
+          <VersionBadge collapsed={collapsed} />
         </div>
       </aside>
     </TooltipProvider>
+  );
+}
+
+function VersionBadge({ collapsed }: { collapsed: boolean }) {
+  return (
+    <div
+      className={cn(
+        "pt-1 pb-0.5 text-[10px] font-medium text-sidebar-muted-foreground/60 whitespace-nowrap overflow-hidden",
+        collapsed ? "text-center" : "px-3"
+      )}
+      title={`Nginx Manager v${pkg.version}`}
+    >
+      v{pkg.version}
+    </div>
   );
 }
 
@@ -318,6 +345,7 @@ export function MobileSidebar() {
           </div>
           <div className="border-t border-sidebar-border px-3 py-2">
             <ThemeToggle collapsed={false} />
+            <VersionBadge collapsed={false} />
           </div>
         </div>
       </SheetContent>

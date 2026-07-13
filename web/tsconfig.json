@@ -12,6 +12,7 @@
     "module": "ESNext",
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,

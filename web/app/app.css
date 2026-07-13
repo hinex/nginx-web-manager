@@ -308,3 +308,10 @@
 /* Dialog content */
 .dialog-content[data-state="open"] { animation: contentIn 200ms ease-out forwards; }
 .dialog-content[data-state="closed"] { animation: contentOut 150ms ease-in forwards; }
+
+/* Top loading bar during route transitions */
+@keyframes loading-bar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.loading-bar { animation: loading-bar 1s ease-in-out infinite; }
