@@ -57,6 +57,17 @@ function defaultRow(overrides: Partial<HostRow> & { id: number }): HostRow {
 
 // ─── Mock external dependencies ──────────────────────────────────────────────
 
+// The app runs on Bun, but vitest may execute under Node (e.g. in CI) where the
+// `Bun` global is absent. Stub the only API we exercise (password.hash) with a
+// bcrypt-shaped fake so hashing code paths stay testable in both runtimes.
+if (typeof (globalThis as any).Bun === "undefined") {
+  vi.stubGlobal("Bun", {
+    password: {
+      hash: async (pw: string) => `$2b$10$stub.${Buffer.from(pw).toString("base64url")}`,
+    },
+  });
+}
+
 vi.mock("~/lib/nginx/generator", () => ({
   generateAllConfigs: vi.fn(),
   removeHostConfig: vi.fn(),
