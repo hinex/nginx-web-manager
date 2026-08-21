@@ -148,15 +148,19 @@ export default function ConfigsPage() {
       body: JSON.stringify({ action: "write", filePath: selectedFile, content }),
     });
     const data = await res.json();
-    if (data.valid) {
-      toast.success("Saved and reloaded nginx");
-      setOriginalContent(content);
-      // Refresh versions if the history panel is open
-      if (historyOpen) {
-        fetchVersions(selectedFile);
-      }
+    if (!data.valid) {
+      toast.error(`Config validation failed, changes reverted: ${data.error}`);
+      return;
+    }
+    if (!data.reloaded) {
+      toast.warning("Saved and validated, but nginx reload failed — run `nginx -s reload` on the host");
     } else {
-      toast.error(`Config validation failed: ${data.error}`);
+      toast.success("Saved and reloaded nginx");
+    }
+    setOriginalContent(content);
+    // Refresh versions if the history panel is open
+    if (historyOpen) {
+      fetchVersions(selectedFile);
     }
   }, [selectedFile, content, dirty, historyOpen, fetchVersions]);
 
@@ -217,7 +221,11 @@ export default function ConfigsPage() {
       });
       const data = await res.json();
       if (data.restored && data.valid) {
-        toast.success("Version restored and nginx reloaded");
+        if (!data.reloaded) {
+          toast.warning("Restored and validated, but nginx reload failed — run `nginx -s reload` on the host");
+        } else {
+          toast.success("Version restored and nginx reloaded");
+        }
         // Reload the file content
         setContent(version.content);
         setOriginalContent(version.content);
@@ -225,12 +233,8 @@ export default function ConfigsPage() {
         if (selectedFile) fetchVersions(selectedFile);
         setSelectedVersion(null);
         setDiff(null);
-      } else if (data.restored && !data.valid) {
-        toast.error(`Restored but validation failed: ${data.error}`);
-        // Still reload content since the file was written
-        setContent(version.content);
-        setOriginalContent(version.content);
-        if (selectedFile) fetchVersions(selectedFile);
+      } else if (data.restored === false && data.valid === false) {
+        toast.error(`Restore validation failed, changes reverted: ${data.error}`);
       } else {
         toast.error(data.error || "Restore failed");
       }
