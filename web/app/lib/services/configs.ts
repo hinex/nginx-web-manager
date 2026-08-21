@@ -282,8 +282,14 @@ export function publishConfig(auth: AuthContext, filePath: string): PublishResul
 
 // ─── Reverse-sync: hand-edited config → host model ──────
 
+/**
+ * `hostId` is `null` when the file isn't a managed `host-<id>.conf` — there is
+ * nothing to classify and the caller should offer a plain save, not a diff
+ * dialog. Callers must branch on `null` explicitly rather than treating a
+ * missing host as "a host with no changes".
+ */
 export interface ConfigEditPreview {
-  hostId: number;
+  hostId: number | null;
   edits: ClassifiedEdit[];
   refusals: Refusal[];
 }
@@ -415,7 +421,7 @@ function auditFieldFor(edit: ClassifiedEdit): { field: string; from: unknown; to
 export function previewConfigEdit(auth: AuthContext, filePath: string, content: string): ConfigEditPreview {
   requireScope(auth, "configs:read");
   const c = classifyFor(filePath, content);
-  if (c === null) return { hostId: -1, edits: [], refusals: [] };
+  if (c === null) return { hostId: null, edits: [], refusals: [] };
   return { hostId: c.hostId, edits: c.edits, refusals: c.refusals };
 }
 

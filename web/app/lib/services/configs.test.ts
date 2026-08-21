@@ -500,6 +500,13 @@ describe("previewConfigEdit / applyConfigEdit", () => {
     expect(writeFileSync).toHaveBeenCalledWith("/data/nginx/conf.d/site.conf", "server { listen 80; }");
   });
 
+  it("previews a non-host-N.conf path as hostId null, not a sentinel", () => {
+    const preview = previewConfigEdit(auth, "conf.d/site.conf", "server { listen 80; }");
+    expect(preview.hostId).toBeNull();
+    expect(preview.edits).toEqual([]);
+    expect(preview.refusals).toEqual([]);
+  });
+
   it("throws ConfigClassificationError mentioning the draft when the host has one", () => {
     hostsStore.set(1, makeHostRow({ draft: { some: "change" } }));
     expect(() => applyConfigEdit(auth, "conf.d/host-1.conf", "server {}")).toThrow(ConfigClassificationError);
