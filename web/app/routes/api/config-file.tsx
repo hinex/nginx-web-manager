@@ -4,6 +4,10 @@ import { saveVersion, getVersions, getVersion, diffVersions } from "~/lib/config
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { logAudit } from "~/lib/audit/log";
+import { writeConfigLive } from "~/lib/services/configs";
+import { InvalidPathError, ForbiddenError } from "~/lib/services/errors";
+import type { AuthContext } from "~/lib/auth/authenticate";
+import { ROLE_CEILINGS, type Role } from "~/lib/auth/scopes";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { resolve } from "path";
 
@@ -17,6 +21,12 @@ function isAllowedPath(filePath: unknown): filePath is string {
 
 export async function action({ request }: Route.ActionArgs) {
   const user = await requireEditor(request);
+  const auth: AuthContext = {
+    userId: user.userId,
+    role: user.role as Role,
+    via: "session",
+    scopes: ROLE_CEILINGS[user.role as Role] ?? [],
+  };
   const body = await request.json();
   const { action: act } = body;
 
@@ -35,32 +45,21 @@ export async function action({ request }: Route.ActionArgs) {
 
     case "write": {
       const { filePath, content, message } = body;
-      if (!isAllowedPath(filePath) || typeof content !== "string") {
+      if (typeof filePath !== "string" || typeof content !== "string") {
         return Response.json({ error: "filePath and content required" }, { status: 400 });
       }
-      if (existsSync(filePath)) {
-        const oldContent = readFileSync(filePath, "utf-8");
-        saveVersion({
-          filePath,
-          content: oldContent,
-          changeType: "manual_edit",
-          userId: user.userId,
-          message: message || undefined,
-        });
+      try {
+        const result = writeConfigLive(auth, filePath, content, message || undefined);
+        return Response.json(result);
+      } catch (err) {
+        if (err instanceof InvalidPathError) {
+          return Response.json({ error: "Invalid path" }, { status: 400 });
+        }
+        if (err instanceof ForbiddenError) {
+          return Response.json({ error: err.message }, { status: 403 });
+        }
+        throw err;
       }
-      writeFileSync(filePath, content);
-      const validation = validateNginxConfig();
-      if (!validation.valid) {
-        return Response.json({ saved: true, valid: false, error: validation.error });
-      }
-      reloadNginx();
-      logAudit({
-        userId: user.userId,
-        action: "update",
-        entity: "config",
-        details: { filePath },
-      });
-      return Response.json({ saved: true, valid: true });
     }
 
     case "delete": {
@@ -81,16 +80,18 @@ export async function action({ request }: Route.ActionArgs) {
       });
       unlinkSync(filePath);
       const validation = validateNginxConfig();
-      if (validation.valid) {
-        reloadNginx();
+      if (!validation.valid) {
+        writeFileSync(filePath, oldContent);
+        return Response.json({ deleted: false, valid: false, error: validation.error });
       }
+      const reloaded = reloadNginx();
       logAudit({
         userId: user.userId,
         action: "delete",
         entity: "config",
-        details: { filePath },
+        details: { filePath, reloaded },
       });
-      return Response.json({ deleted: true });
+      return Response.json({ deleted: true, valid: true, reloaded });
     }
 
     case "versions": {
@@ -158,19 +159,22 @@ export async function action({ request }: Route.ActionArgs) {
           message: `Before restore to version ${versionId}`,
         });
       }
+      const previous = existsSync(version.filePath) ? readFileSync(version.filePath, "utf-8") : null;
       writeFileSync(version.filePath, version.content);
       const validation = validateNginxConfig();
       if (!validation.valid) {
-        return Response.json({ restored: true, valid: false, error: validation.error });
+        if (previous !== null) writeFileSync(version.filePath, previous);
+        else unlinkSync(version.filePath);
+        return Response.json({ restored: false, valid: false, error: validation.error });
       }
-      reloadNginx();
+      const reloaded = reloadNginx();
       logAudit({
         userId: user.userId,
         action: "update",
         entity: "config",
-        details: { filePath: version.filePath, restoredFromVersion: versionId },
+        details: { filePath: version.filePath, restoredFromVersion: versionId, reloaded },
       });
-      return Response.json({ restored: true, valid: true });
+      return Response.json({ restored: true, valid: true, reloaded });
     }
 
     default:
