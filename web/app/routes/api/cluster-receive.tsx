@@ -1,8 +1,5 @@
-import { writeFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
 import { timingSafeEqual } from "crypto";
-import { validateNginxConfig } from "~/lib/nginx/validator";
-import { reloadNginx } from "~/lib/nginx/reload";
+import { applyClusterConfigs } from "~/lib/services/cluster-receive";
 
 function keysMatch(provided: string | null, expected: string | undefined): boolean {
   if (!provided || !expected) return false;
@@ -25,38 +22,26 @@ export async function action({ request }: { request: Request }) {
 
   const { configs } = await request.json();
 
-  if (!configs || typeof configs !== "object") {
+  if (!configs || typeof configs !== "object" || Array.isArray(configs)) {
     return Response.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const results = { written: 0, errors: [] as string[] };
+  const result = applyClusterConfigs(configs as Record<string, string>);
 
-  for (const [path, content] of Object.entries(configs)) {
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, content as string);
-      results.written++;
-    } catch (err) {
-      results.errors.push(`${path}: ${(err as Error).message}`);
-    }
-  }
-
-  const validation = validateNginxConfig();
-  if (!validation.valid) {
+  if (result.rejected.length > 0) {
+    console.error(`[cluster-receive] rejected out-of-tree paths: ${result.rejected.join(", ")}`);
     return Response.json(
-      {
-        error: "Config validation failed",
-        details: validation.error,
-        results,
-      },
+      { error: "Rejected paths outside the nginx config directory", rejected: result.rejected },
       { status: 400 }
     );
   }
 
-  const reloaded = reloadNginx();
+  if (!result.valid) {
+    return Response.json(
+      { error: "Config validation failed", details: result.validationError, results: result },
+      { status: 400 }
+    );
+  }
 
-  return Response.json({
-    success: true,
-    results: { ...results, reloaded },
-  });
+  return Response.json({ success: true, results: result });
 }
