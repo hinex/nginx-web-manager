@@ -171,149 +171,200 @@ function flagRemovalEdit(ref: DirectiveRef): ClassifiedEdit | null {
 
 type ServerFieldHandler = (ref: DirectiveRef, host: HostConfig) => ClassifiedEdit;
 
-const SERVER_FIELDS: Record<string, ServerFieldHandler> = {
-  client_max_body_size: (ref, host) => ({
-    kind: "field",
+/**
+ * A whitelisted server-scope directive: `field` is the host field it maps to
+ * (the single source of truth reused as-is by Task 6's model-line
+ * highlighting — do not restate this table anywhere else), `build` produces
+ * the actual ClassifiedEdit for a real delta entry.
+ */
+export interface ServerFieldEntry {
+  field: string;
+  build: ServerFieldHandler;
+}
+
+export const SERVER_FIELDS: Record<string, ServerFieldEntry> = {
+  client_max_body_size: {
     field: "clientMaxBodySize",
-    from: host.clientMaxBodySize,
-    to: ref.args[0],
-    label: `client_max_body_size ${host.clientMaxBodySize} → ${ref.args[0]}`,
-  }),
-  server_name: (ref, host) => ({
-    kind: "field",
+    build: (ref, host) => ({
+      kind: "field",
+      field: "clientMaxBodySize",
+      from: host.clientMaxBodySize,
+      to: ref.args[0],
+      label: `client_max_body_size ${host.clientMaxBodySize} → ${ref.args[0]}`,
+    }),
+  },
+  server_name: {
     field: "domains",
-    from: host.domains,
-    to: [...ref.args],
-    label: `server_name ${host.domains.join(" ")} → ${ref.args.join(" ")}`,
-  }),
-  ssl_certificate: (ref, host) => ({
-    kind: "field",
+    build: (ref, host) => ({
+      kind: "field",
+      field: "domains",
+      from: host.domains,
+      to: [...ref.args],
+      label: `server_name ${host.domains.join(" ")} → ${ref.args.join(" ")}`,
+    }),
+  },
+  ssl_certificate: {
     field: "sslCertPath",
-    from: host.sslCertPath,
-    to: ref.args[0],
-    label: `ssl_certificate ${host.sslCertPath ?? "(none)"} → ${ref.args[0]}`,
-  }),
-  ssl_certificate_key: (ref, host) => ({
-    kind: "field",
+    build: (ref, host) => ({
+      kind: "field",
+      field: "sslCertPath",
+      from: host.sslCertPath,
+      to: ref.args[0],
+      label: `ssl_certificate ${host.sslCertPath ?? "(none)"} → ${ref.args[0]}`,
+    }),
+  },
+  ssl_certificate_key: {
     field: "sslKeyPath",
-    from: host.sslKeyPath,
-    to: ref.args[0],
-    label: `ssl_certificate_key ${host.sslKeyPath ?? "(none)"} → ${ref.args[0]}`,
-  }),
+    build: (ref, host) => ({
+      kind: "field",
+      field: "sslKeyPath",
+      from: host.sslKeyPath,
+      to: ref.args[0],
+      label: `ssl_certificate_key ${host.sslKeyPath ?? "(none)"} → ${ref.args[0]}`,
+    }),
+  },
 };
 
 // ── LOCATION_FIELDS whitelist ──
 
 type LocationFieldHandler = (ref: DirectiveRef, loc: Location, index: number) => ClassifiedEdit[];
 
-const LOCATION_FIELDS: Record<string, LocationFieldHandler> = {
-  proxy_pass: (ref, loc, index) => {
-    const target = ref.args[0] ?? "";
-    const m = /^([a-z]+):\/\/([^:/]+)(?::(\d+))?/i.exec(target);
-    const scheme = m?.[1] ?? "http";
-    const server = m?.[2] ?? "";
-    const port = m?.[3] ? Number(m[3]) : scheme === "https" ? 443 : 80;
-    const prev = loc.upstreams[0];
-    const newUpstreams = [{ server, port, weight: prev?.weight ?? 1, protocol: prev?.protocol }];
-    const edits: ClassifiedEdit[] = [
-      {
-        kind: "location-field",
-        index,
-        field: "upstreams",
-        from: loc.upstreams,
-        to: newUpstreams,
-        label: `proxy_pass → ${target}`,
-      },
-    ];
-    if (scheme !== loc.forwardScheme) {
-      edits.push({
-        kind: "location-field",
-        index,
-        field: "forwardScheme",
-        from: loc.forwardScheme,
-        to: scheme,
-        label: `forwardScheme ${loc.forwardScheme} → ${scheme}`,
-      });
-    }
-    return edits;
+/**
+ * A whitelisted location-scope directive: `field` is the primary location
+ * field it maps to (the same table Task 6's model-line highlighting reuses
+ * verbatim — do not restate it), `build` produces the actual edit(s).
+ */
+export interface LocationFieldEntry {
+  field: string;
+  build: LocationFieldHandler;
+}
+
+export const LOCATION_FIELDS: Record<string, LocationFieldEntry> = {
+  proxy_pass: {
+    field: "upstreams",
+    build: (ref, loc, index) => {
+      const target = ref.args[0] ?? "";
+      const m = /^([a-z]+):\/\/([^:/]+)(?::(\d+))?/i.exec(target);
+      const scheme = m?.[1] ?? "http";
+      const server = m?.[2] ?? "";
+      const port = m?.[3] ? Number(m[3]) : scheme === "https" ? 443 : 80;
+      const prev = loc.upstreams[0];
+      const newUpstreams = [{ server, port, weight: prev?.weight ?? 1, protocol: prev?.protocol }];
+      const edits: ClassifiedEdit[] = [
+        {
+          kind: "location-field",
+          index,
+          field: "upstreams",
+          from: loc.upstreams,
+          to: newUpstreams,
+          label: `proxy_pass → ${target}`,
+        },
+      ];
+      if (scheme !== loc.forwardScheme) {
+        edits.push({
+          kind: "location-field",
+          index,
+          field: "forwardScheme",
+          from: loc.forwardScheme,
+          to: scheme,
+          label: `forwardScheme ${loc.forwardScheme} → ${scheme}`,
+        });
+      }
+      return edits;
+    },
   },
-  alias: (ref, loc, index) => [
-    {
-      kind: "location-field",
-      index,
-      field: "staticDir",
-      from: loc.staticDir,
-      to: ref.args[0],
-      label: `alias ${loc.staticDir} → ${ref.args[0]}`,
-    },
-  ],
-  root: (ref, loc, index) => [
-    {
-      kind: "location-field",
-      index,
-      field: "staticDir",
-      from: loc.staticDir,
-      to: ref.args[0],
-      label: `root ${loc.staticDir} → ${ref.args[0]}`,
-    },
-  ],
-  expires: (ref, loc, index) => [
-    {
-      kind: "location-field",
-      index,
-      field: "cacheExpires",
-      from: loc.cacheExpires,
-      to: ref.args[0],
-      label: `expires ${loc.cacheExpires} → ${ref.args[0]}`,
-    },
-  ],
-  return: (ref, loc, index) => {
-    const status = Number(ref.args[0]);
-    const target = ref.args[1] ?? "";
-    const m = /^([a-z]+):\/\/([^/]+)(\/.*)?$/i.exec(target);
-    const domain = m?.[2] ?? loc.forwardDomain;
-    const path = m?.[3] ?? loc.forwardPath ?? "/";
-    return [
+  alias: {
+    field: "staticDir",
+    build: (ref, loc, index) => [
       {
         kind: "location-field",
         index,
-        field: "statusCode",
-        from: loc.statusCode,
-        to: status,
-        label: `return ${loc.statusCode} → ${status}`,
+        field: "staticDir",
+        from: loc.staticDir,
+        to: ref.args[0],
+        label: `alias ${loc.staticDir} → ${ref.args[0]}`,
       },
-      {
-        kind: "location-field",
-        index,
-        field: "forwardDomain",
-        from: loc.forwardDomain,
-        to: domain,
-        label: `forwardDomain ${loc.forwardDomain} → ${domain}`,
-      },
-      {
-        kind: "location-field",
-        index,
-        field: "forwardPath",
-        from: loc.forwardPath,
-        to: path,
-        label: `forwardPath ${loc.forwardPath} → ${path}`,
-      },
-    ];
+    ],
   },
-  proxy_set_header: (ref, loc, index) => {
-    const [key, ...rest] = ref.args;
-    const value = rest.join(" ");
-    const newHeaders = { ...loc.headers, [key]: value };
-    return [
+  root: {
+    field: "staticDir",
+    build: (ref, loc, index) => [
       {
         kind: "location-field",
         index,
-        field: "headers",
-        from: loc.headers,
-        to: newHeaders,
-        label: `proxy_set_header ${key} → ${value}`,
+        field: "staticDir",
+        from: loc.staticDir,
+        to: ref.args[0],
+        label: `root ${loc.staticDir} → ${ref.args[0]}`,
       },
-    ];
+    ],
+  },
+  expires: {
+    field: "cacheExpires",
+    build: (ref, loc, index) => [
+      {
+        kind: "location-field",
+        index,
+        field: "cacheExpires",
+        from: loc.cacheExpires,
+        to: ref.args[0],
+        label: `expires ${loc.cacheExpires} → ${ref.args[0]}`,
+      },
+    ],
+  },
+  return: {
+    field: "statusCode",
+    build: (ref, loc, index) => {
+      const status = Number(ref.args[0]);
+      const target = ref.args[1] ?? "";
+      const m = /^([a-z]+):\/\/([^/]+)(\/.*)?$/i.exec(target);
+      const domain = m?.[2] ?? loc.forwardDomain;
+      const path = m?.[3] ?? loc.forwardPath ?? "/";
+      return [
+        {
+          kind: "location-field",
+          index,
+          field: "statusCode",
+          from: loc.statusCode,
+          to: status,
+          label: `return ${loc.statusCode} → ${status}`,
+        },
+        {
+          kind: "location-field",
+          index,
+          field: "forwardDomain",
+          from: loc.forwardDomain,
+          to: domain,
+          label: `forwardDomain ${loc.forwardDomain} → ${domain}`,
+        },
+        {
+          kind: "location-field",
+          index,
+          field: "forwardPath",
+          from: loc.forwardPath,
+          to: path,
+          label: `forwardPath ${loc.forwardPath} → ${path}`,
+        },
+      ];
+    },
+  },
+  proxy_set_header: {
+    field: "headers",
+    build: (ref, loc, index) => {
+      const [key, ...rest] = ref.args;
+      const value = rest.join(" ");
+      const newHeaders = { ...loc.headers, [key]: value };
+      return [
+        {
+          kind: "location-field",
+          index,
+          field: "headers",
+          from: loc.headers,
+          to: newHeaders,
+          label: `proxy_set_header ${key} → ${value}`,
+        },
+      ];
+    },
   },
 };
 
@@ -490,9 +541,9 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
 
 function classifyServerOrLocationEntry(ref: DirectiveRef, host: HostConfig, edits: ClassifiedEdit[]): void {
   if (ref.scope.length === 1 && ref.scope[0] === "server" && ref.name !== "location") {
-    const handler = SERVER_FIELDS[ref.name];
-    if (handler) {
-      edits.push(handler(ref, host));
+    const entry = SERVER_FIELDS[ref.name];
+    if (entry) {
+      edits.push(entry.build(ref, host));
     } else {
       edits.push({ kind: "server-advanced", text: ref.text, label: `${ref.name} → Advanced` });
     }
@@ -504,9 +555,9 @@ function classifyServerOrLocationEntry(ref: DirectiveRef, host: HostConfig, edit
     const index = findLocationIndex(host, scope);
     if (index < 0) return; // matched-location children should always resolve; guard defensively
     const loc = host.locations[index];
-    const handler = LOCATION_FIELDS[ref.name];
-    if (handler) {
-      edits.push(...handler(ref, loc, index));
+    const entry = LOCATION_FIELDS[ref.name];
+    if (entry) {
+      edits.push(...entry.build(ref, loc, index));
     } else {
       edits.push({
         kind: "location-advanced",

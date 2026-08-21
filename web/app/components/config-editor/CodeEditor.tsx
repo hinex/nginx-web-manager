@@ -1,12 +1,24 @@
-import { useEffect, useRef } from "react";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view";
+import { useEffect, useMemo, useRef } from "react";
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  gutter,
+  GutterMarker,
+  Decoration,
+} from "@codemirror/view";
+import type { Text } from "@codemirror/state";
 import { EditorState, Compartment } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { completionKeymap } from "@codemirror/autocomplete";
+import { linter, type Diagnostic } from "@codemirror/lint";
 import { tags } from "@lezer/highlight";
 import { nginx } from "./nginx-syntax";
+import { modelLines, syntaxError, type ModelLine } from "./model-highlight";
 
 // ── Light theme ──────────────────────────────────────────
 const lightTheme = EditorView.theme({
@@ -74,6 +86,72 @@ function isDark() {
   return typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 }
 
+// ── Model-line highlighting (Task 6) ────────────────────
+// Marks lines the reverse-sync classifier (`~/lib/nginx/reverse/classify.ts`,
+// via `modelLines`) would map back onto a host field. Purely informational —
+// these lines stay fully editable, this just tells the user the system
+// already understands them.
+
+const modelHighlightTheme = EditorView.baseTheme({
+  ".cm-model-gutter": { width: "0.9em" },
+  ".cm-model-marker": { color: "#10b981", fontSize: "0.7em" },
+  ".cm-model-line": { backgroundColor: "oklch(0.85 0.08 160 / 0.12)" },
+});
+
+class ModelFieldMarker extends GutterMarker {
+  constructor(private readonly field: string) {
+    super();
+  }
+  eq(other: GutterMarker): boolean {
+    return other instanceof ModelFieldMarker && other.field === this.field;
+  }
+  toDOM(): Node {
+    const span = document.createElement("span");
+    span.className = "cm-model-marker";
+    span.title = `→ ${this.field}`;
+    span.textContent = "●";
+    return span;
+  }
+}
+
+function buildModelHighlightExtensions(marks: ModelLine[], doc: Text) {
+  const byLine = new Map(marks.map((m) => [m.line, m.field]));
+
+  const modelGutter = gutter({
+    class: "cm-model-gutter",
+    lineMarker(view, line) {
+      const lineNo = view.state.doc.lineAt(line.from).number;
+      const field = byLine.get(lineNo);
+      return field ? new ModelFieldMarker(field) : null;
+    },
+  });
+
+  const ranges = [];
+  for (const [lineNo, field] of byLine) {
+    if (lineNo < 1 || lineNo > doc.lines) continue;
+    const line = doc.line(lineNo);
+    ranges.push(Decoration.line({ class: "cm-model-line", attributes: { title: `→ ${field}` } }).range(line.from));
+  }
+  ranges.sort((a, b) => a.from - b.from);
+
+  return [modelGutter, EditorView.decorations.of(Decoration.set(ranges))];
+}
+
+// Live syntax diagnostic — reuses `syntaxError()` from Task 1 (design record
+// §refusal 6). Never a second implementation. `@codemirror/lint`'s own
+// `delay` option provides the ~300ms debounce off `onChange`.
+const nginxLinter = linter(
+  (view) => {
+    const problem = syntaxError(view.state.doc.toString());
+    if (!problem) return [];
+    const lineNo = Math.min(Math.max(problem.line, 1), view.state.doc.lines);
+    const { from, to } = view.state.doc.line(lineNo);
+    const diagnostic: Diagnostic = { from, to, severity: "error", message: problem.message };
+    return [diagnostic];
+  },
+  { delay: 300 }
+);
+
 interface CodeEditorProps {
   value: string;
   onChange?: (value: string) => void;
@@ -91,6 +169,7 @@ export function CodeEditor({ value, onChange, onSave, readOnly = false, classNam
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeComp = useRef(new Compartment());
+  const modelHighlightComp = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const onRegisterInsertRef = useRef(onRegisterInsert);
@@ -100,6 +179,10 @@ export function CodeEditor({ value, onChange, onSave, readOnly = false, classNam
   onSaveRef.current = onSave;
   onRegisterInsertRef.current = onRegisterInsert;
   onRegisterJumpToLineRef.current = onRegisterJumpToLine;
+
+  // Recomputed on every value change (including live edits, since `value`
+  // reflects the buffer after `onChange` round-trips through the parent).
+  const marks = useMemo(() => modelLines(value), [value]);
 
   // Initialize editor once on mount
   useEffect(() => {
@@ -135,6 +218,9 @@ export function CodeEditor({ value, onChange, onSave, readOnly = false, classNam
         highlightSelectionMatches(),
         nginx(),
         themeComp.current.of(dark ? [darkTheme, darkHighlight] : [lightTheme, lightHighlight]),
+        modelHighlightTheme,
+        modelHighlightComp.current.of([]),
+        nginxLinter,
         saveKeymap,
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, ...foldKeymap, ...completionKeymap]),
         updateListener,
@@ -196,6 +282,17 @@ export function CodeEditor({ value, onChange, onSave, readOnly = false, classNam
       });
     }
   }, [value]);
+
+  // Re-derive the model-line gutter marker + background whenever the
+  // model-owned lines change (including the initial mount). Editing stays
+  // fully enabled on these lines — this is informational only.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: modelHighlightComp.current.reconfigure(buildModelHighlightExtensions(marks, view.state.doc)),
+    });
+  }, [marks]);
 
   return <div ref={containerRef} className={className} />;
 }
