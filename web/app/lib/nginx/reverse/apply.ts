@@ -1,4 +1,4 @@
-import type { ClassifiedEdit } from "./classify";
+import type { ClassifiedEdit, StreamHostConfig } from "./classify";
 import type { HostConfig } from "~/lib/nginx/templates/server-block";
 
 type Location = HostConfig["locations"][number];
@@ -80,6 +80,27 @@ export function applyEdits(host: HostConfig, edits: ClassifiedEdit[]): HostConfi
   }
   if (additions.length > 0) {
     next = { ...next, locations: [...next.locations, ...additions] };
+  }
+
+  return next;
+}
+
+/**
+ * Pure reducer for the stream branch (Task 8): applies a batch of
+ * `stream-field` edits to a StreamHostConfig and returns a new one. Never
+ * touches the DB or filesystem. `classifyStreamDelta` only ever produces
+ * `stream-field` edits (plus refusals) for a stream file, so this ignores
+ * any other edit kind defensively rather than asserting on it.
+ */
+export function applyStreamEdits(host: StreamHostConfig, edits: ClassifiedEdit[]): StreamHostConfig {
+  let next: StreamHostConfig = {
+    ...host,
+    streamPorts: host.streamPorts.map((sp) => ({ ...sp, upstreams: sp.upstreams.map((u) => ({ ...u })) })),
+  };
+
+  for (const edit of edits) {
+    if (edit.kind !== "stream-field") continue;
+    next.streamPorts[edit.index] = { ...next.streamPorts[edit.index], [edit.field]: edit.to };
   }
 
   return next;

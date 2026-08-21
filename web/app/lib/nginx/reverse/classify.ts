@@ -15,7 +15,12 @@ export type ClassifiedEdit =
   | { kind: "location-added"; path: string; matchType: string; type: string; body: string; label: string }
   | { kind: "location-removed"; index: number; label: string; losing: string[] }
   | { kind: "server-advanced"; text: string; label: string }
-  | { kind: "prelude"; text: string; label: string };
+  | { kind: "prelude"; text: string; label: string }
+  // Task 8 (stream): streamPorts[] has no advanced/raw escape hatch in the
+  // schema (unlike locations[].advanced / advancedNginx), so the stream
+  // branch only ever produces this one field-shaped edit kind, or a refusal
+  // — see classifyStreamDelta below.
+  | { kind: "stream-field"; index: number; field: string; from: unknown; to: unknown; label: string };
 
 export interface Refusal {
   line: number;
@@ -567,4 +572,323 @@ function classifyServerOrLocationEntry(ref: DirectiveRef, host: HostConfig, edit
       });
     }
   }
+}
+
+// ── Stream branch (Task 8) ──────────────────────────────────────────────
+//
+// A stream host file (`stream.d/host-<id>-stream.conf`) has a completely
+// different shape from an HTTP host file: there is no wrapping `server {}`
+// for the whole file — each stream port emits its own anonymous
+// `server { listen ...; proxy_pass ...; }` alongside a named
+// `upstream stream_host_<id>_port_<i> {}` block, both directly at AST
+// depth 0. Reusing classifyDelta/SERVER_FIELDS/LOCATION_FIELDS against it
+// would silently mismap `listen`/`proxy_pass` onto the HTTP whitelist (whose
+// scope strings happen to collide textually, e.g. both use `["server"]`),
+// so this is a deliberately separate function/type family. See
+// NUANCES.md #39+ for the reasoning and limitations below.
+
+export interface StreamHostConfig {
+  id: number;
+  streamPorts: Array<{
+    port: number;
+    protocol: "tcp" | "udp";
+    upstreams: Array<{ server: string; port: number; weight: number }>;
+    balanceMethod: string;
+  }>;
+}
+
+type StreamUpstream = StreamHostConfig["streamPorts"][number]["upstreams"][number];
+
+const REASON_STREAM_UNMAPPABLE =
+  "This directive has no equivalent stream host field — edit it in the host form, or revert the change";
+const REASON_STREAM_STRUCTURE =
+  "Adding or removing a stream port from the file isn't supported — use the host form instead";
+
+const BALANCE_DIRECTIVE_NAMES = new Set(["least_conn", "ip_hash", "random"]);
+
+function upstreamIndexFromScopeKey(hostId: number, key: string): number | null {
+  const m = new RegExp(`^upstream stream_host_${hostId}_port_(\\d+)$`).exec(key);
+  return m ? Number(m[1]) : null;
+}
+
+function parseServerLine(argsStr: string): StreamUpstream {
+  const parts = argsStr.trim().split(/\s+/).filter(Boolean);
+  const addr = parts[0] ?? "";
+  const colonIdx = addr.lastIndexOf(":");
+  const server = colonIdx >= 0 ? addr.slice(0, colonIdx) : addr;
+  const port = colonIdx >= 0 ? Number(addr.slice(colonIdx + 1)) : NaN;
+  const weightArg = parts.find((p) => p.startsWith("weight="));
+  const weight = weightArg ? Number(weightArg.slice("weight=".length)) : 1;
+  return { server, port, weight };
+}
+
+function parseListenLine(argsStr: string): { port: number; protocol: "tcp" | "udp" } {
+  const parts = argsStr.trim().split(/\s+/).filter(Boolean);
+  const protocol: "tcp" | "udp" = parts.includes("udp") ? "udp" : "tcp";
+  const m = /(\d+)$/.exec(parts[0] ?? "");
+  return { port: m ? Number(m[1]) : NaN, protocol };
+}
+
+function findStreamPortIndex(host: StreamHostConfig, port: number, protocol: "tcp" | "udp"): number {
+  return host.streamPorts.findIndex((sp) => sp.port === port && sp.protocol === protocol);
+}
+
+type StreamEntry = {
+  kind: "added" | "removed" | "changed";
+  name: string;
+  line: number;
+  args: string[];
+  beforeArgs?: string[];
+};
+
+/**
+ * Classifies a delta produced against a stream host file. Kept entirely
+ * separate from `classifyDelta` — see the block comment above.
+ */
+export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Classification {
+  const edits: ClassifiedEdit[] = [];
+  const refusals: Refusal[] = [];
+
+  const consumedAdded = new Set<DirectiveRef>();
+  const consumedRemoved = new Set<DirectiveRef>();
+  const consumedChangedAfter = new Set<DirectiveRef>();
+
+  // 1. resolver / set $backend_* — same global-settings refusal as HTTP.
+  for (const c of delta.changed) {
+    const r = globalSettingsRefusal(c.after);
+    if (r) {
+      refusals.push(r);
+      consumedChangedAfter.add(c.after);
+    }
+  }
+  for (const d of delta.added) {
+    const r = globalSettingsRefusal(d);
+    if (r) {
+      refusals.push(r);
+      consumedAdded.add(d);
+    }
+  }
+  for (const d of delta.removed) {
+    const r = globalSettingsRefusal(d);
+    if (r) {
+      refusals.push(r);
+      consumedRemoved.add(d);
+    }
+  }
+
+  // 2. Upstream rename — identical shape to the HTTP case: diffAst pairs
+  // `upstream` blocks by scopeKey, so a rename never arrives as `changed`,
+  // only as a removed+added pair. `upstreamRenameRefusal` already matches
+  // both the HTTP (`host_<id>_loc_<i>`) and stream (`stream_host_<id>_port_<i>`)
+  // naming patterns.
+  const rename = upstreamRenameRefusal(delta);
+  if (rename) {
+    refusals.push(rename.refusal);
+    consumedRemoved.add(rename.removed);
+    for (const d of delta.added) {
+      if (d.name === "upstream") consumedAdded.add(d);
+    }
+  }
+
+  // 3. Any other whole `upstream`/`server` block added or removed at the top
+  // level would add or remove an entire stream port. There is no
+  // ClassifiedEdit shape for that (the plan's whitelist only covers
+  // directive-level edits within an existing port) and no raw escape hatch
+  // to stash it in — refuse rather than guess.
+  for (const d of delta.added) {
+    if (consumedAdded.has(d)) continue;
+    if (d.scope.length === 0 && (d.name === "upstream" || d.name === "server")) {
+      refusals.push({ line: d.line, directive: d.name, reason: REASON_STREAM_STRUCTURE });
+      consumedAdded.add(d);
+    }
+  }
+  for (const d of delta.removed) {
+    if (consumedRemoved.has(d)) continue;
+    if (d.scope.length === 0 && (d.name === "upstream" || d.name === "server")) {
+      refusals.push({ line: d.line, directive: d.name, reason: REASON_STREAM_STRUCTURE });
+      consumedRemoved.add(d);
+    }
+  }
+
+  // 4. Bucket everything else by the upstream index it belongs to (decoded
+  // from the `upstream stream_host_<id>_port_<i>` scope name) or by the
+  // top-level anonymous `server` scope (listen/proxy_pass/unknown).
+  //
+  // NOTE: for hosts with more than one stream port, every anonymous
+  // `server {}` block shares the identical scopeKey "server" (no args to
+  // distinguish them) — match.ts's Map-based block pairing (see match.ts
+  // walk(), expByKey/actByKey) silently collapses them to a single
+  // comparison, the same pre-existing limitation already documented for
+  // HTTP's "second server block" case (NUANCES.md #15). We do not attempt
+  // to fix that here (out of this task's file list) — see NUANCES.md #39.
+  const byUpstreamIndex = new Map<number, StreamEntry[]>();
+  const serverScopeEntries: StreamEntry[] = [];
+
+  function bucket(ref: DirectiveRef, kind: StreamEntry["kind"], beforeArgs?: string[]) {
+    if (ref.scope.length !== 1) return;
+    const idx = upstreamIndexFromScopeKey(host.id, ref.scope[0]);
+    const entry: StreamEntry = { kind, name: ref.name, line: ref.line, args: ref.args, beforeArgs };
+    if (idx !== null) {
+      if (!byUpstreamIndex.has(idx)) byUpstreamIndex.set(idx, []);
+      byUpstreamIndex.get(idx)!.push(entry);
+    } else if (ref.scope[0] === "server") {
+      serverScopeEntries.push(entry);
+    }
+  }
+
+  for (const d of delta.added) {
+    if (!consumedAdded.has(d)) bucket(d, "added");
+  }
+  for (const d of delta.removed) {
+    if (!consumedRemoved.has(d)) bucket(d, "removed");
+  }
+  for (const c of delta.changed) {
+    if (!consumedChangedAfter.has(c.after)) bucket(c.after, "changed", c.before.args);
+  }
+
+  // 5. Per-upstream reconstruction: `upstreams[]` (by value-matching, since
+  // DirectiveRef carries no positional index) and `balanceMethod` (see the
+  // round-trip note on buildUpstreamBlock below).
+  for (const [idx, entries] of byUpstreamIndex) {
+    const port = host.streamPorts[idx];
+    if (!port) continue; // defensive: index decoded from the name but no matching model entry
+
+    const unknown = entries.find((e) => e.name !== "server" && !BALANCE_DIRECTIVE_NAMES.has(e.name));
+    if (unknown) {
+      refusals.push({ line: unknown.line, directive: unknown.name, reason: REASON_STREAM_UNMAPPABLE });
+      continue;
+    }
+
+    const serverEntries = entries.filter((e) => e.name === "server");
+    const balanceAdded = entries.find((e) => e.kind === "added" && BALANCE_DIRECTIVE_NAMES.has(e.name));
+    const balanceRemoved = entries.find((e) => e.kind === "removed" && BALANCE_DIRECTIVE_NAMES.has(e.name));
+
+    // Value-match `changed`/`removed` server lines against the current model
+    // array (rather than trusting sequential position — see match.ts's
+    // grouping, which preserves relative order per name but nothing tells us
+    // which original index a bare `changed`/`removed` entry came from when
+    // more than one server line exists).
+    const upstreams: StreamUpstream[] = port.upstreams.map((u) => ({ ...u }));
+    const consumedIdx = new Set<number>();
+    const findByValue = (v: StreamUpstream) =>
+      upstreams.findIndex(
+        (u, i) => !consumedIdx.has(i) && u.server === v.server && u.port === v.port && u.weight === v.weight
+      );
+
+    for (const e of serverEntries) {
+      if (e.kind === "changed" && e.beforeArgs) {
+        const before = parseServerLine(e.beforeArgs.join(" "));
+        const at = findByValue(before);
+        const next = parseServerLine(e.args.join(" "));
+        if (at >= 0) {
+          upstreams[at] = next;
+          consumedIdx.add(at);
+        } else {
+          upstreams.push(next);
+        }
+      }
+    }
+    for (const e of serverEntries) {
+      if (e.kind === "removed") {
+        const val = parseServerLine(e.args.join(" "));
+        const at = findByValue(val);
+        if (at >= 0) {
+          upstreams.splice(at, 1);
+          consumedIdx.add(at);
+        }
+      }
+    }
+    for (const e of serverEntries) {
+      if (e.kind === "added") {
+        upstreams.push(parseServerLine(e.args.join(" ")));
+      }
+    }
+
+    // balanceMethod round-trip: buildUpstreamBlock (templates/upstream.ts)
+    // emits NO directive at all for "round_robin", and ALSO no directive for
+    // "weighted" (weight is carried on the `server` lines instead, only
+    // appended when weight > 1). So:
+    //  - an explicit directive appearing/disappearing always wins;
+    //  - otherwise, only actual weight>1 evidence in the reconstructed
+    //    upstreams[] can move the model between "round_robin" and "weighted"
+    //    — if nothing weight-related changed, balanceMethod must not be
+    //    touched at all (the trap this task calls out explicitly: never
+    //    silently flip weighted<->round_robin on an unrelated edit).
+    let balanceMethod = port.balanceMethod;
+    if (balanceAdded) {
+      balanceMethod = balanceAdded.name;
+    } else if (balanceRemoved) {
+      balanceMethod = upstreams.some((u) => u.weight > 1) ? "weighted" : "round_robin";
+    } else if (serverEntries.length > 0 && !BALANCE_DIRECTIVE_NAMES.has(port.balanceMethod)) {
+      balanceMethod = upstreams.some((u) => u.weight > 1) ? "weighted" : "round_robin";
+    }
+
+    if (JSON.stringify(upstreams) !== JSON.stringify(port.upstreams)) {
+      edits.push({
+        kind: "stream-field",
+        index: idx,
+        field: "upstreams",
+        from: port.upstreams,
+        to: upstreams,
+        label: `streamPorts[${idx}].upstreams updated`,
+      });
+    }
+    if (balanceMethod !== port.balanceMethod) {
+      edits.push({
+        kind: "stream-field",
+        index: idx,
+        field: "balanceMethod",
+        from: port.balanceMethod,
+        to: balanceMethod,
+        label: `balanceMethod ${port.balanceMethod} → ${balanceMethod}`,
+      });
+    }
+  }
+
+  // 6. Top-level anonymous `server` scope: listen (port/protocol) is
+  // whitelisted; proxy_pass and anything else has no field to land in.
+  const listenHandled = new Set<number>();
+  for (const e of serverScopeEntries) {
+    if (e.name !== "listen") {
+      refusals.push({ line: e.line, directive: e.name, reason: REASON_STREAM_UNMAPPABLE });
+      continue;
+    }
+    if (e.kind !== "changed" || !e.beforeArgs) {
+      // An asymmetric listen add/remove (not paired with a matching change)
+      // can't be safely attributed to one model port — refuse.
+      refusals.push({ line: e.line, directive: "listen", reason: REASON_STREAM_UNMAPPABLE });
+      continue;
+    }
+    const before = parseListenLine(e.beforeArgs.join(" "));
+    const idx = findStreamPortIndex(host, before.port, before.protocol);
+    // Each stream port emits two `listen` lines (ipv4 + ipv6) that change
+    // together — `listenHandled` collapses the pair into a single edit.
+    if (idx < 0 || listenHandled.has(idx)) continue;
+    listenHandled.add(idx);
+
+    const after = parseListenLine(e.args.join(" "));
+    const port = host.streamPorts[idx];
+    if (after.port !== port.port) {
+      edits.push({
+        kind: "stream-field",
+        index: idx,
+        field: "port",
+        from: port.port,
+        to: after.port,
+        label: `listen ${port.port} → ${after.port}`,
+      });
+    }
+    if (after.protocol !== port.protocol) {
+      edits.push({
+        kind: "stream-field",
+        index: idx,
+        field: "protocol",
+        from: port.protocol,
+        to: after.protocol,
+        label: `protocol ${port.protocol} → ${after.protocol}`,
+      });
+    }
+  }
+
+  return { edits, refusals };
 }

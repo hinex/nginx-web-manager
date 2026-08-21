@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { parse } from "~/lib/nginx/parser";
 import { diffAst, type AstDelta } from "./match";
-import { classifyDelta, type ClassifiedEdit } from "./classify";
+import { classifyDelta, classifyStreamDelta, type ClassifiedEdit, type StreamHostConfig } from "./classify";
 import type { HostConfig } from "~/lib/nginx/templates/server-block";
+import { buildStreamBlock } from "~/lib/nginx/templates/stream";
 
 const baseHost: HostConfig = {
   id: 7,
@@ -702,5 +703,359 @@ server {
     expect(c.refusals).toEqual([]);
     const removed = findEdit(c.edits, "location-removed");
     expect(removed).toBeDefined();
+  });
+});
+
+describe("classifyStreamDelta", () => {
+  const baseStreamHost: StreamHostConfig = {
+    id: 7,
+    streamPorts: [
+      {
+        port: 9000,
+        protocol: "tcp",
+        upstreams: [{ server: "10.0.0.1", port: 9000, weight: 1 }],
+        balanceMethod: "round_robin",
+      },
+    ],
+  };
+
+  function streamDeltaFor(host: StreamHostConfig, actualText: string) {
+    const expectedText = buildStreamBlock(host.id, host.streamPorts, null, null);
+    return diffAst(parse(expectedText), parse(actualText));
+  }
+
+  it("maps a changed listen port to streamPorts[i].port", () => {
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.1:9000;
+}
+server {
+    listen 9001;
+    listen [::]:9001;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const c = classifyStreamDelta(streamDeltaFor(baseStreamHost, actual), baseStreamHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "port", from: 9000, to: 9001 })
+    );
+  });
+
+  it("maps a changed protocol (tcp -> udp) to streamPorts[i].protocol", () => {
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.1:9000;
+}
+server {
+    listen 9000 udp;
+    listen [::]:9000 udp;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const c = classifyStreamDelta(streamDeltaFor(baseStreamHost, actual), baseStreamHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "protocol", from: "tcp", to: "udp" })
+    );
+  });
+
+  it("maps a changed upstream server address/port to streamPorts[i].upstreams", () => {
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.2:9100;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const c = classifyStreamDelta(streamDeltaFor(baseStreamHost, actual), baseStreamHost);
+    expect(c.refusals).toEqual([]);
+    const edit = c.edits.find((e) => e.kind === "stream-field" && e.field === "upstreams") as any;
+    expect(edit).toBeDefined();
+    expect(edit.to).toEqual([{ server: "10.0.0.2", port: 9100, weight: 1 }]);
+    // Core trap: an unrelated field change must never flip balanceMethod.
+    expect(c.edits.some((e) => e.kind === "stream-field" && e.field === "balanceMethod")).toBe(false);
+  });
+
+  it("refuses renaming a stream_host_<id>_port_<i> upstream via a real diffAst delta", () => {
+    const actual = `
+upstream mine {
+    server 10.0.0.1:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass mine;
+}
+`;
+    const c = classifyStreamDelta(streamDeltaFor(baseStreamHost, actual), baseStreamHost);
+    const renameRefusals = c.refusals.filter((r) => r.reason.match(/internal link identifier/));
+    // Exactly one refusal for the rename itself — the removed+added pair
+    // must not be double-counted.
+    expect(renameRefusals).toHaveLength(1);
+  });
+
+  it("refuses an unrecognised directive inside a stream upstream block (no advanced/raw field exists)", () => {
+    const actual = `
+upstream stream_host_7_port_0 {
+    keepalive 32;
+    server 10.0.0.1:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const c = classifyStreamDelta(streamDeltaFor(baseStreamHost, actual), baseStreamHost);
+    expect(c.edits).toEqual([]);
+    expect(c.refusals[0].reason).toMatch(/no equivalent stream host field/);
+  });
+
+  it("refuses an edited resolver directive inside a stream server block", () => {
+    const dnsHost: StreamHostConfig = baseStreamHost;
+    const expectedText = buildStreamBlock(dnsHost.id, dnsHost.streamPorts, "8.8.8.8", "30s");
+    const actual = `
+server {
+    listen 9000;
+    listen [::]:9000;
+    resolver 1.1.1.1 valid=30s;
+    set $backend_stream_host_7_port_0 "10.0.0.1:9000";
+    proxy_pass $backend_stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, dnsHost);
+    expect(c.refusals.some((r) => r.reason.match(/global settings/))).toBe(true);
+  });
+
+  it("refuses set $backend_* edits inside a stream server block", () => {
+    const dnsHost: StreamHostConfig = baseStreamHost;
+    const expectedText = buildStreamBlock(dnsHost.id, dnsHost.streamPorts, "8.8.8.8", "30s");
+    const actual = `
+server {
+    listen 9000;
+    listen [::]:9000;
+    resolver 8.8.8.8 valid=30s;
+    set $backend_stream_host_7_port_0 "10.0.0.2:9100";
+    proxy_pass $backend_stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, dnsHost);
+    expect(c.refusals.some((r) => r.reason.match(/global settings/))).toBe(true);
+  });
+
+  // ── balanceMethod round-trip: one test per value (the core trap) ──
+
+  const twoUpstreamHost: StreamHostConfig = {
+    id: 7,
+    streamPorts: [
+      {
+        port: 9000,
+        protocol: "tcp",
+        upstreams: [
+          { server: "10.0.0.1", port: 9000, weight: 1 },
+          { server: "10.0.0.2", port: 9000, weight: 1 },
+        ],
+        balanceMethod: "round_robin",
+      },
+    ],
+  };
+
+  it("balanceMethod round_robin -> least_conn: an added `least_conn;` directive wins", () => {
+    const expectedText = buildStreamBlock(twoUpstreamHost.id, twoUpstreamHost.streamPorts, null, null);
+    const actual = `
+upstream stream_host_7_port_0 {
+    least_conn;
+    server 10.0.0.1:9000;
+    server 10.0.0.2:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, twoUpstreamHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "balanceMethod", from: "round_robin", to: "least_conn" })
+    );
+  });
+
+  it("balanceMethod round_robin -> ip_hash: an added `ip_hash;` directive wins", () => {
+    const expectedText = buildStreamBlock(twoUpstreamHost.id, twoUpstreamHost.streamPorts, null, null);
+    const actual = `
+upstream stream_host_7_port_0 {
+    ip_hash;
+    server 10.0.0.1:9000;
+    server 10.0.0.2:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, twoUpstreamHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "balanceMethod", from: "round_robin", to: "ip_hash" })
+    );
+  });
+
+  it("balanceMethod round_robin -> random: an added `random;` directive wins", () => {
+    const expectedText = buildStreamBlock(twoUpstreamHost.id, twoUpstreamHost.streamPorts, null, null);
+    const actual = `
+upstream stream_host_7_port_0 {
+    random;
+    server 10.0.0.1:9000;
+    server 10.0.0.2:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, twoUpstreamHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "balanceMethod", from: "round_robin", to: "random" })
+    );
+  });
+
+  const leastConnHost: StreamHostConfig = {
+    id: 7,
+    streamPorts: [{ ...twoUpstreamHost.streamPorts[0], balanceMethod: "least_conn" }],
+  };
+
+  it("balanceMethod least_conn -> round_robin: removing the directive with no weight evidence anywhere", () => {
+    const expectedText = buildStreamBlock(leastConnHost.id, leastConnHost.streamPorts, null, null);
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.1:9000;
+    server 10.0.0.2:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, leastConnHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "balanceMethod", from: "least_conn", to: "round_robin" })
+    );
+  });
+
+  it("balanceMethod round_robin -> weighted: adding weight= on a server line with no directive involved", () => {
+    const expectedText = buildStreamBlock(twoUpstreamHost.id, twoUpstreamHost.streamPorts, null, null);
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.1:9000 weight=5;
+    server 10.0.0.2:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, twoUpstreamHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "balanceMethod", from: "round_robin", to: "weighted" })
+    );
+    const upstreamsEdit = c.edits.find((e) => e.kind === "stream-field" && e.field === "upstreams") as any;
+    expect(upstreamsEdit.to).toEqual([
+      { server: "10.0.0.1", port: 9000, weight: 5 },
+      { server: "10.0.0.2", port: 9000, weight: 1 },
+    ]);
+  });
+
+  const weightedHost: StreamHostConfig = {
+    id: 7,
+    streamPorts: [
+      {
+        port: 9000,
+        protocol: "tcp",
+        upstreams: [
+          { server: "10.0.0.1", port: 9000, weight: 5 },
+          { server: "10.0.0.2", port: 9000, weight: 1 },
+        ],
+        balanceMethod: "weighted",
+      },
+    ],
+  };
+
+  it("balanceMethod weighted -> round_robin: removing the last weight>1 annotation with no directive involved", () => {
+    const expectedText = buildStreamBlock(weightedHost.id, weightedHost.streamPorts, null, null);
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.1:9000;
+    server 10.0.0.2:9000;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, weightedHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", field: "balanceMethod", from: "weighted", to: "round_robin" })
+    );
+  });
+
+  it("balanceMethod: does not flip weighted->round_robin from an unrelated server address change", () => {
+    const expectedText = buildStreamBlock(weightedHost.id, weightedHost.streamPorts, null, null);
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.1:9000 weight=5;
+    server 10.0.0.99:9200;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const delta = diffAst(parse(expectedText), parse(actual));
+    const c = classifyStreamDelta(delta, weightedHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits.some((e) => e.kind === "stream-field" && e.field === "balanceMethod")).toBe(false);
+    const upstreamsEdit = c.edits.find((e) => e.kind === "stream-field" && e.field === "upstreams") as any;
+    expect(upstreamsEdit.to).toEqual([
+      { server: "10.0.0.1", port: 9000, weight: 5 },
+      { server: "10.0.0.99", port: 9200, weight: 1 },
+    ]);
+  });
+
+  it("balanceMethod: does not flip round_robin->weighted when nothing weight-related changed", () => {
+    const actual = `
+upstream stream_host_7_port_0 {
+    server 10.0.0.2:9100;
+}
+server {
+    listen 9000;
+    listen [::]:9000;
+    proxy_pass stream_host_7_port_0;
+}
+`;
+    const c = classifyStreamDelta(streamDeltaFor(baseStreamHost, actual), baseStreamHost);
+    expect(c.edits.some((e) => e.kind === "stream-field" && e.field === "balanceMethod")).toBe(false);
   });
 });
