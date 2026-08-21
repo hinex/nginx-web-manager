@@ -34,6 +34,8 @@ const REASON_LISTEN_443 = "Turn SSL off in the host's SSL tab instead of deletin
 const REASON_UPSTREAM_RENAME = "This upstream name is an internal link identifier and cannot be renamed";
 const REASON_SECOND_SERVER = "A second server block cannot be represented in the host model";
 const REASON_AMBIGUOUS_LOCATIONS = "Two or more locations changed at once and cannot be matched to model entries";
+const REASON_UNMAPPABLE_REMOVAL =
+  "Deleting this line cannot be mapped back to a host field — revert the line, or make the change in the host form";
 
 // ── parseLocationScope / core-detection — exported for Task 6 reuse ──
 
@@ -436,11 +438,15 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
       consumedChangedAfter.add(c.after);
     }
   }
-  // Removed prelude content has no representation in the ClassifiedEdit
-  // union (nothing to keep raw) — accepted silently. See NUANCES.md #15.
+  // Removed prelude content (e.g. a `map`/`upstream` block that isn't part
+  // of an upstream rename) has no representation in the ClassifiedEdit union
+  // — refuse instead of silently dropping the line. See NUANCES.md #16.
   for (const d of delta.removed) {
     if (consumedRemoved.has(d)) continue;
-    if (d.scope.length === 0) consumedRemoved.add(d);
+    if (d.scope.length === 0) {
+      refusals.push({ line: d.line, directive: d.name, reason: REASON_UNMAPPABLE_REMOVAL });
+      consumedRemoved.add(d);
+    }
   }
 
   // 3 & 4. Scope ["server"] → whitelist / server-advanced.
@@ -458,13 +464,25 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
     if (d.scope.length === 1 && d.scope[0] === "server") {
       // 6. Flag removals.
       const flagEdit = flagRemovalEdit(d);
-      if (flagEdit) edits.push(flagEdit);
-      // Any other unmatched removal at server scope has no raw-text
-      // representation to remove from (advancedNginx is additive text) —
-      // accepted silently. See NUANCES.md #15.
+      if (flagEdit) {
+        edits.push(flagEdit);
+      } else {
+        // Any other unmatched removal at server scope has no raw-text
+        // representation to remove from (advancedNginx is additive text) —
+        // refuse rather than silently drop the line. See NUANCES.md #16.
+        refusals.push({ line: d.line, directive: d.name, reason: REASON_UNMAPPABLE_REMOVAL });
+      }
+      consumedRemoved.add(d);
+      continue;
     }
-    // Removed directives inside a matched location that aren't flags are
-    // likewise accepted silently — no test coverage, no interface slot.
+    if (d.scope.length === 2 && d.scope[0] === "server") {
+      // Removed directive inside a matched location that isn't the removal
+      // of the whole location block itself (that's handled above, §5) —
+      // no field-level "unset" representation exists yet. Refuse rather
+      // than silently drop the line. See NUANCES.md #16.
+      refusals.push({ line: d.line, directive: d.name, reason: REASON_UNMAPPABLE_REMOVAL });
+      consumedRemoved.add(d);
+    }
   }
 
   return { edits, refusals };

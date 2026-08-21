@@ -562,4 +562,145 @@ server {
     );
     expect(c.refusals[0].line).toBeGreaterThan(0);
   });
+
+  // ── Unmappable removals must refuse, not silently revert (see NUANCES.md #16) ──
+
+  it("refuses removing client_max_body_size at server scope", () => {
+    const c = classifyDelta(
+      deltaFor(`
+server {
+    listen 80;
+    server_name example.com;
+    location /api {
+        proxy_pass http://10.0.0.1:8080;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+`),
+      baseHost
+    );
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("client_max_body_size");
+    expect(c.refusals[0].reason).toMatch(/cannot be mapped back to a host field/);
+    expect(c.refusals[0].line).toBeGreaterThan(0);
+  });
+
+  it("refuses removing a single proxy_set_header inside a matched location", () => {
+    const c = classifyDelta(
+      deltaFor(`
+server {
+    listen 80;
+    server_name example.com;
+    client_max_body_size 1m;
+    location /api {
+        proxy_pass http://10.0.0.1:8080;
+    }
+}
+`),
+      baseHost
+    );
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("proxy_set_header");
+    expect(c.refusals[0].reason).toMatch(/cannot be mapped back to a host field/);
+  });
+
+  it("refuses removing a prelude map block that is not an upstream rename", () => {
+    const withMap = `
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    "" close;
+}
+${BASE_SERVER}`;
+    const delta = diffAst(parse(withMap), parse(BASE_SERVER));
+    const c = classifyDelta(delta, baseHost);
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("map");
+    expect(c.refusals[0].reason).toMatch(/cannot be mapped back to a host field/);
+  });
+
+  it("still turns a removed http2 on into http2:false with no refusal", () => {
+    const withHttp2 = `
+server {
+    listen 80;
+    server_name example.com;
+    client_max_body_size 1m;
+    http2 on;
+    location /api {
+        proxy_pass http://10.0.0.1:8080;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+`;
+    const delta = diffAst(parse(withHttp2), parse(BASE_SERVER));
+    const c = classifyDelta(delta, { ...baseHost, http2: true });
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "field", field: "http2", from: true, to: false })
+    );
+  });
+
+  it("still turns a removed force-https if block into sslForceHttps:false with no refusal", () => {
+    const withForceHttps = `
+server {
+    listen 80;
+    server_name example.com;
+    client_max_body_size 1m;
+    if ($scheme = http) {
+        return 301 https://$host$request_uri;
+    }
+    location /api {
+        proxy_pass http://10.0.0.1:8080;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+`;
+    const delta = diffAst(parse(withForceHttps), parse(BASE_SERVER));
+    const c = classifyDelta(delta, { ...baseHost, sslForceHttps: true });
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "field", field: "sslForceHttps", from: true, to: false })
+    );
+  });
+
+  it("still turns a removed www-redirect if block into redirectWww:false with no refusal", () => {
+    const withWwwRedirect = `
+server {
+    listen 80;
+    server_name example.com;
+    client_max_body_size 1m;
+    if ($host ~ ^www\\.(.+)$) {
+        return 301 $scheme://example.com$request_uri;
+    }
+    location /api {
+        proxy_pass http://10.0.0.1:8080;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+`;
+    const delta = diffAst(parse(withWwwRedirect), parse(BASE_SERVER));
+    const c = classifyDelta(delta, { ...baseHost, redirectWww: true });
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "field", field: "redirectWww", from: true, to: false })
+    );
+  });
+
+  it("still removes a whole location block as location-removed with no refusal", () => {
+    const c = classifyDelta(
+      deltaFor(`
+server {
+    listen 80;
+    server_name example.com;
+    client_max_body_size 1m;
+}
+`),
+      baseHost
+    );
+    expect(c.refusals).toEqual([]);
+    const removed = findEdit(c.edits, "location-removed");
+    expect(removed).toBeDefined();
+  });
 });
