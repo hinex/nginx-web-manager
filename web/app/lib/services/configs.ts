@@ -17,7 +17,7 @@ import { logAudit } from "~/lib/audit/log";
 
 const DRAFT_SUFFIX = ".draft";
 
-function nginxDir(): string {
+export function nginxDir(): string {
   return resolve(process.env.NGINX_DIR || "/data/nginx");
 }
 
