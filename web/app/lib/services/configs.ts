@@ -157,6 +157,68 @@ export function writeConfigDraft(
   };
 }
 
+export interface LiveWriteResult {
+  saved: boolean;
+  valid: boolean;
+  reloaded: boolean;
+  error?: string;
+}
+
+/**
+ * Write straight to a live config file. Unlike writeConfigDraft this touches
+ * what nginx actually serves, so a failed `nginx -t` is rolled back before we
+ * return: the caller never ends up with a broken file on disk.
+ */
+export function writeConfigLive(
+  auth: AuthContext,
+  filePath: string,
+  content: string,
+  message?: string
+): LiveWriteResult {
+  requireScope(auth, "configs:publish");
+  const livePath = resolveConfigPath(filePath);
+
+  const original = existsSync(livePath) ? readFileSync(livePath, "utf-8") : null;
+  if (original !== null) {
+    saveVersion({
+      filePath: livePath,
+      content: original,
+      changeType: "manual_edit",
+      userId: auth.userId,
+      message,
+    });
+  }
+
+  writeFileSync(livePath, content);
+
+  let validation: { valid: boolean; error?: string };
+  try {
+    validation = validateNginxConfig();
+  } catch (err) {
+    // Restore before propagating: the validator itself blew up (spawn failure),
+    // we still must not leave unvalidated content live.
+    if (original !== null) writeFileSync(livePath, original);
+    else unlinkSync(livePath);
+    throw err;
+  }
+
+  if (!validation.valid) {
+    if (original !== null) writeFileSync(livePath, original);
+    else unlinkSync(livePath);
+    return { saved: false, valid: false, reloaded: false, error: validation.error };
+  }
+
+  const reloaded = reloadNginx();
+  logAudit({
+    userId: auth.userId,
+    action: "update",
+    entity: "config",
+    details: auditDetails(auth, { filePath: livePath, reloaded }),
+  });
+
+  return { saved: true, valid: true, reloaded };
+}
+
 export interface PublishResult {
   published: boolean;
   valid: boolean;

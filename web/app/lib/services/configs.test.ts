@@ -27,6 +27,7 @@ import {
   resolveConfigPath,
   readConfig,
   writeConfigDraft,
+  writeConfigLive,
   publishConfig,
   deleteConfig,
   listConfigs,
@@ -194,6 +195,79 @@ describe("publishConfig", () => {
     expect(vi.mocked(writeFileSync).mock.calls.at(-1)).toEqual([LIVE, "live content"]);
     expect(unlinkSync).not.toHaveBeenCalled();
     expect(reloadNginx).not.toHaveBeenCalled();
+  });
+});
+
+describe("writeConfigLive", () => {
+  const auth = ctx(["configs:read", "configs:write", "configs:publish"]);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(validateNginxConfig).mockReturnValue({ valid: true });
+    vi.mocked(reloadNginx).mockReturnValue(true);
+  });
+
+  it("reverts the file and reports valid:false when nginx -t fails", () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue("original content" as never);
+    vi.mocked(validateNginxConfig).mockReturnValue({ valid: false, error: "line 3: unknown directive" });
+
+    const result = writeConfigLive(auth, "/data/nginx/conf.d/host-7.conf", "broken content");
+
+    expect(result).toEqual({
+      saved: false,
+      valid: false,
+      reloaded: false,
+      error: "line 3: unknown directive",
+    });
+    // last write must restore the original
+    const writes = vi.mocked(writeFileSync).mock.calls;
+    expect(writes[writes.length - 1]).toEqual(["/data/nginx/conf.d/host-7.conf", "original content"]);
+    expect(reloadNginx).not.toHaveBeenCalled();
+  });
+
+  it("deletes a newly created file when nginx -t fails", () => {
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(validateNginxConfig).mockReturnValue({ valid: false, error: "bad" });
+
+    const result = writeConfigLive(auth, "/data/nginx/conf.d/new.conf", "broken");
+
+    expect(result.saved).toBe(false);
+    expect(unlinkSync).toHaveBeenCalledWith("/data/nginx/conf.d/new.conf");
+  });
+
+  it("reports reloaded:false when the reload command fails", () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue("old" as never);
+    vi.mocked(reloadNginx).mockReturnValue(false);
+
+    const result = writeConfigLive(auth, "/data/nginx/conf.d/host-7.conf", "good content");
+
+    expect(result).toEqual({ saved: true, valid: true, reloaded: false });
+  });
+
+  it("saves a version of the previous content before overwriting", () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue("old" as never);
+
+    writeConfigLive(auth, "/data/nginx/conf.d/host-7.conf", "new", "my message");
+
+    expect(saveVersion).toHaveBeenCalledWith({
+      filePath: "/data/nginx/conf.d/host-7.conf",
+      content: "old",
+      changeType: "manual_edit",
+      userId: 1,
+      message: "my message",
+    });
+  });
+
+  it("rejects a path outside the nginx dir", () => {
+    expect(() => writeConfigLive(auth, "/etc/passwd", "x")).toThrow(InvalidPathError);
+  });
+
+  it("rejects an auth context without configs:publish", () => {
+    const viewer = { via: "session", userId: 2, scopes: ["configs:read"] } as AuthContext;
+    expect(() => writeConfigLive(viewer, "/data/nginx/conf.d/host-7.conf", "x")).toThrow(ForbiddenError);
   });
 });
 
