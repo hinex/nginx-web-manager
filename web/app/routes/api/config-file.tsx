@@ -4,8 +4,8 @@ import { saveVersion, getVersions, getVersion, diffVersions } from "~/lib/config
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { logAudit } from "~/lib/audit/log";
-import { writeConfigLive } from "~/lib/services/configs";
-import { InvalidPathError, ForbiddenError } from "~/lib/services/errors";
+import { previewConfigEdit, applyConfigEdit } from "~/lib/services/configs";
+import { InvalidPathError, ForbiddenError, ConfigClassificationError } from "~/lib/services/errors";
 import type { AuthContext } from "~/lib/auth/authenticate";
 import { ROLE_CEILINGS, type Role } from "~/lib/auth/scopes";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
@@ -43,15 +43,46 @@ export async function action({ request }: Route.ActionArgs) {
       return Response.json({ content });
     }
 
-    case "write": {
-      const { filePath, content, message } = body;
+    // Classifies a hand-edited config against the host model without writing
+    // anything, so the editor can show the ApplyDialog confirmation before save.
+    case "preview": {
+      const { filePath, content } = body;
       if (typeof filePath !== "string" || typeof content !== "string") {
         return Response.json({ error: "filePath and content required" }, { status: 400 });
       }
       try {
-        const result = writeConfigLive(auth, filePath, content, message || undefined);
+        const preview = previewConfigEdit(auth, filePath, content);
+        return Response.json(preview);
+      } catch (err) {
+        if (err instanceof ConfigClassificationError) {
+          return Response.json({ refusals: err.refusals }, { status: 422 });
+        }
+        if (err instanceof InvalidPathError) {
+          return Response.json({ error: "Invalid path" }, { status: 400 });
+        }
+        if (err instanceof ForbiddenError) {
+          return Response.json({ error: err.message }, { status: 403 });
+        }
+        throw err;
+      }
+    }
+
+    case "write": {
+      const { filePath, content } = body;
+      if (typeof filePath !== "string" || typeof content !== "string") {
+        return Response.json({ error: "filePath and content required" }, { status: 400 });
+      }
+      try {
+        // Reverse-syncs the edit into the host model when filePath is a managed
+        // host-<id>.conf; falls back to a plain writeConfigLive otherwise. Never
+        // silent: an unmappable delta throws ConfigClassificationError below
+        // instead of writing anything.
+        const result = applyConfigEdit(auth, filePath, content);
         return Response.json(result);
       } catch (err) {
+        if (err instanceof ConfigClassificationError) {
+          return Response.json({ refusals: err.refusals }, { status: 422 });
+        }
         if (err instanceof InvalidPathError) {
           return Response.json({ error: "Invalid path" }, { status: 400 });
         }

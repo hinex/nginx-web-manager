@@ -22,6 +22,9 @@ import {
 import { cn } from "~/lib/utils";
 import { toast } from "sonner";
 import { onTemplateInsert } from "~/lib/events/template-insert";
+import { ApplyDialog } from "~/components/config-editor/ApplyDialog";
+import type { ConfigEditPreview } from "~/lib/services/configs";
+import type { Refusal } from "~/lib/nginx/reverse/classify";
 
 const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
@@ -99,6 +102,10 @@ export default function ConfigsPage() {
   const [restoreTarget, setRestoreTarget] = useState<ConfigVersion | null>(null);
   const [restoring, setRestoring] = useState(false);
 
+  // Reverse-sync confirmation dialog state (config editor → host model)
+  const [applyDialogOpen, setApplyDialogOpen] = useState(false);
+  const [preview, setPreview] = useState<ConfigEditPreview | null>(null);
+
   // Fetch version history for the current file
   const fetchVersions = useCallback(async (filePath: string) => {
     setVersionsLoading(true);
@@ -140,29 +147,99 @@ export default function ConfigsPage() {
     }
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (!selectedFile || !dirty) return;
+  // Writes the current buffer via the "write" action (routed through
+  // applyConfigEdit on the server, which reverse-syncs into the host model
+  // for a managed host-<id>.conf and falls back to a plain live write
+  // otherwise). Shared by the plain-save path and the ApplyDialog's Apply
+  // button, so both go through the exact same request shape.
+  const writeConfigFile = useCallback(async (): Promise<
+    { ok: true } | { ok: false; refusals?: Refusal[] }
+  > => {
+    if (!selectedFile) return { ok: false };
     const res = await fetch("/api/config-file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "write", filePath: selectedFile, content }),
     });
+    if (res.status === 422) {
+      const data = await res.json();
+      return { ok: false, refusals: (data.refusals ?? []) as Refusal[] };
+    }
     const data = await res.json();
     if (!data.valid) {
       toast.error(`Config validation failed, changes reverted: ${data.error}`);
-      return;
+      return { ok: false };
     }
     if (!data.reloaded) {
       toast.warning("Saved and validated, but nginx reload failed — run `nginx -s reload` on the host");
     } else {
       toast.success("Saved and reloaded nginx");
     }
-    setOriginalContent(content);
-    // Refresh versions if the history panel is open
-    if (historyOpen) {
-      fetchVersions(selectedFile);
+    // Text normalisation is part of the contract: after a save the file is
+    // regenerated from the model, so re-read it from disk rather than
+    // trusting the buffer we sent — for a managed host file the canonical
+    // text differs from what was typed, and the user must see that.
+    const readRes = await fetch("/api/config-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "read", filePath: selectedFile }),
+    });
+    const readData = await readRes.json();
+    const canonical = typeof readData.content === "string" ? readData.content : content;
+    setContent(canonical);
+    setOriginalContent(canonical);
+    if (historyOpen) fetchVersions(selectedFile);
+    return { ok: true };
+  }, [selectedFile, content, historyOpen, fetchVersions]);
+
+  // Save is never silent: it always previews the classification first. A
+  // managed host-<id>.conf shows the ApplyDialog so the user confirms what
+  // was understood before anything is written; a file with nothing to
+  // classify (hostId === null) has no diff to show, so it saves directly.
+  const handleSave = useCallback(async () => {
+    if (!selectedFile || !dirty) return;
+    const res = await fetch("/api/config-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "preview", filePath: selectedFile, content }),
+    });
+    if (res.status === 422) {
+      // e.g. the host has an unpublished draft — refuse before the file ever
+      // reaches the ApplyDialog's "apply" path.
+      const data = await res.json();
+      setPreview({ hostId: null, edits: [], refusals: (data.refusals ?? []) as Refusal[] });
+      setApplyDialogOpen(true);
+      return;
     }
-  }, [selectedFile, content, dirty, historyOpen, fetchVersions]);
+    const data: ConfigEditPreview = await res.json();
+    if (data.hostId === null) {
+      await writeConfigFile();
+      return;
+    }
+    setPreview(data);
+    setApplyDialogOpen(true);
+  }, [selectedFile, content, dirty, writeConfigFile]);
+
+  const handleApplyConfirm = useCallback(async () => {
+    const result = await writeConfigFile();
+    if (result.ok) {
+      setApplyDialogOpen(false);
+      setPreview(null);
+      return;
+    }
+    if (result.refusals) {
+      // The write itself refused the regenerated config (e.g. a business-rule
+      // refusal the preview already surfaced, or a `nginx -t` failure on the
+      // regenerated file) — re-render the same dialog in refusal mode rather
+      // than closing it as if the save had gone through.
+      setPreview((prev) => ({ hostId: prev?.hostId ?? null, edits: [], refusals: result.refusals! }));
+    }
+  }, [writeConfigFile]);
+
+  const handleCancelApply = useCallback(() => {
+    setApplyDialogOpen(false);
+    setPreview(null);
+  }, []);
 
   const handleChange = useCallback((text: string) => {
     setContent(text);
@@ -251,10 +328,22 @@ export default function ConfigsPage() {
     insertAtCursorRef.current = fn;
   }, []);
 
-  // Clear the insert ref when not in code editor mode (the view would be destroyed)
+  // Ref for the CodeEditor jump-to-line function, used by ApplyDialog refusal rows
+  const jumpToLineRef = useRef<((line: number) => void) | null>(null);
+
+  const handleRegisterJumpToLine = useCallback((fn: (line: number) => void) => {
+    jumpToLineRef.current = fn;
+  }, []);
+
+  const handleJumpToLine = useCallback((line: number) => {
+    jumpToLineRef.current?.(line);
+  }, []);
+
+  // Clear the insert/jump refs when not in code editor mode (the view would be destroyed)
   useEffect(() => {
     if (editorMode !== "code") {
       insertAtCursorRef.current = null;
+      jumpToLineRef.current = null;
     }
   }, [editorMode]);
 
@@ -394,6 +483,7 @@ export default function ConfigsPage() {
                     onChange={handleChange}
                     onSave={() => handleSave()}
                     onRegisterInsert={handleRegisterInsert}
+                    onRegisterJumpToLine={handleRegisterJumpToLine}
                     className="h-full"
                   />
                 ) : editorMode === "block" && BlockEditor ? (
@@ -467,6 +557,17 @@ export default function ConfigsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Confirmation diff dialog: every accepted config-file edit goes through
+          this before anything is written. */}
+      <ApplyDialog
+        open={applyDialogOpen}
+        preview={preview}
+        generatedWarning={false}
+        onApply={handleApplyConfirm}
+        onCancel={handleCancelApply}
+        onJumpToLine={handleJumpToLine}
+      />
     </div>
   );
 }

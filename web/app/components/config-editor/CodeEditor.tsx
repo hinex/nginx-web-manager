@@ -81,19 +81,25 @@ interface CodeEditorProps {
   readOnly?: boolean;
   className?: string;
   onRegisterInsert?: (fn: (text: string) => void) => void;
+  /** Registers a function that moves the cursor to a given 1-based line and
+   *  scrolls it into view. Used by ApplyDialog's refusal rows so clicking a
+   *  refusal jumps straight to the offending line. */
+  onRegisterJumpToLine?: (fn: (line: number) => void) => void;
 }
 
-export function CodeEditor({ value, onChange, onSave, readOnly = false, className, onRegisterInsert }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, onSave, readOnly = false, className, onRegisterInsert, onRegisterJumpToLine }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const themeComp = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const onRegisterInsertRef = useRef(onRegisterInsert);
+  const onRegisterJumpToLineRef = useRef(onRegisterJumpToLine);
 
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
   onRegisterInsertRef.current = onRegisterInsert;
+  onRegisterJumpToLineRef.current = onRegisterJumpToLine;
 
   // Initialize editor once on mount
   useEffect(() => {
@@ -150,6 +156,16 @@ export function CodeEditor({ value, onChange, onSave, readOnly = false, classNam
         changes: { from: pos, insert: text },
         selection: { anchor: pos + text.length },
       });
+    });
+
+    onRegisterJumpToLineRef.current?.((line: number) => {
+      const clamped = Math.max(1, Math.min(line || 1, view.state.doc.lines));
+      const linePos = view.state.doc.line(clamped);
+      view.dispatch({
+        selection: { anchor: linePos.from, head: linePos.from },
+        effects: EditorView.scrollIntoView(linePos.from, { y: "center" }),
+      });
+      view.focus();
     });
 
     // Watch for dark mode changes via MutationObserver
