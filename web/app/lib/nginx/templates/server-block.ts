@@ -32,6 +32,8 @@ export interface HostConfig {
     headers: Record<string, string>;
     accessListId: number | null;
     basicAuth?: { enabled: boolean; users: Array<{ username: string; password: string }> } | { enabled: false } | null;
+    /** Raw remainder: extra directives on a recognised location, or the whole body for type "advanced". */
+    advanced?: string;
   }>;
   advancedNginx: string | null;
   webhookUrl: string | null;
@@ -39,6 +41,8 @@ export interface HostConfig {
   basicAuth?: { enabled: boolean; users: Array<{ username: string; password: string }> } | null;
   dnsResolver?: string | null;
   dnsResolverValid?: string | null;
+  /** Unrecognised content from outside server {} (upstream/map blocks), rendered verbatim before the server block. */
+  customPrelude?: string | null;
 }
 
 /**
@@ -71,6 +75,12 @@ export function buildServerBlock(
         if (block) parts.push(block);
       }
     }
+  }
+
+  // ── Unrecognised prelude content from a hand-edited config (upstream/map blocks) ──
+  // Raw text: rendered verbatim, no indentation or reformatting.
+  if (host.customPrelude) {
+    parts.push(host.customPrelude);
   }
 
   // ── Server block ──
@@ -194,6 +204,19 @@ export function buildServerBlock(
     const loc = host.locations[i];
     const locationDirective = buildLocationDirective(loc.path, loc.matchType);
     serverLines.push(`    ${locationDirective} {`);
+
+    // A location whose core is unrecognised (reverse-sync escape hatch): the whole
+    // body is kept as raw text. No upstream, no headers, no access list, no basic auth.
+    if (loc.type === "advanced") {
+      if (loc.advanced) {
+        for (const line of loc.advanced.split("\n")) {
+          serverLines.push(`        ${line}`);
+        }
+      }
+      serverLines.push("    }");
+      serverLines.push("");
+      continue;
+    }
 
     // Access control for this location
     if (loc.accessListId && accessLists.has(loc.accessListId)) {
@@ -323,6 +346,13 @@ export function buildServerBlock(
     if (loc.headers && Object.keys(loc.headers).length > 0) {
       for (const [key, value] of Object.entries(loc.headers)) {
         serverLines.push(`        add_header ${key} "${value}";`);
+      }
+    }
+
+    // Unrecognised remainder from a hand-edited config (reverse-sync escape hatch)
+    if (loc.advanced) {
+      for (const line of loc.advanced.split("\n")) {
+        serverLines.push(`        ${line}`);
       }
     }
 

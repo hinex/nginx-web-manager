@@ -63,7 +63,7 @@ export const hosts = sqliteTable("hosts", {
     .$type<Array<{
       path: string;
       matchType: "prefix" | "exact" | "regex";
-      type: "proxy" | "static" | "redirect";
+      type: "proxy" | "static" | "redirect" | "advanced";
       upstreams: Array<{ server: string; port: number; weight: number; protocol?: "http" | "https" | "grpc" | "grpcs" | "fastcgi" }>;
       balanceMethod: string;
       staticDir: string;
@@ -75,6 +75,8 @@ export const hosts = sqliteTable("hosts", {
       statusCode: number;
       headers: Record<string, string>;
       accessListId: number | null;
+      /** Raw remainder: extra directives on a recognised location, or the whole body for type "advanced". */
+      advanced?: string;
     }>>()
     .notNull()
     .default([]),
@@ -92,6 +94,8 @@ export const hosts = sqliteTable("hosts", {
   // Common
   webhookUrl: text("webhook_url"),
   advancedNginx: text("advanced_nginx"),
+  // Unrecognised content outside server {} (upstream/map blocks) from a hand-edited config, rendered verbatim before the server block.
+  customPrelude: text("custom_prelude"),
   basicAuth: text("basic_auth", { mode: "json" })
     .$type<{ enabled: boolean; users: Array<{ username: string; password: string }> } | null>()
     .default(null),
