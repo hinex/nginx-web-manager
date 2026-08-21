@@ -143,6 +143,7 @@ import {
   listConfigs,
   previewConfigEdit,
   applyConfigEdit,
+  isGeneratedSystemFile,
 } from "./configs";
 
 const ctx = (scopes: Scope[]): AuthContext => ({
@@ -658,5 +659,31 @@ describe("previewConfigEdit / applyConfigEdit", () => {
   it("previewConfigEdit requires configs:read", () => {
     hostsStore.set(1, makeHostRow());
     expect(() => previewConfigEdit(ctx([]), "conf.d/host-1.conf", "server {}")).toThrow(ForbiddenError);
+  });
+});
+
+describe("isGeneratedSystemFile", () => {
+  it.each([
+    "/data/nginx/conf.d/admin.conf",
+    "/data/nginx/conf.d/status.conf",
+    "/data/nginx/conf.d/default.conf",
+  ])("flags %s as generated", (p) => {
+    expect(isGeneratedSystemFile(p)).toBe(true);
+  });
+
+  it.each([
+    "/data/nginx/conf.d/host-7.conf",
+    "/data/nginx/conf.d/my.conf",
+    // nginx.conf is written under NGINX_CONF_DIR (/etc/nginx by default), a
+    // path the editor never opens — flagging it would describe a file the
+    // dialog can never actually reach, so it must NOT be in the set.
+    "/data/nginx/nginx.conf",
+  ])("does not flag %s", (p) => {
+    expect(isGeneratedSystemFile(p)).toBe(false);
+  });
+
+  it("flags a generated filename even under a different NGINX_DIR root (basename match only)", () => {
+    expect(isGeneratedSystemFile("/some/other/root/conf.d/admin.conf")).toBe(true);
+    expect(isGeneratedSystemFile("relative/path/status.conf")).toBe(true);
   });
 });

@@ -23,7 +23,13 @@ import { cn } from "~/lib/utils";
 import { toast } from "sonner";
 import { onTemplateInsert } from "~/lib/events/template-insert";
 import { ApplyDialog } from "~/components/config-editor/ApplyDialog";
-import type { ConfigEditPreview } from "~/lib/services/configs";
+// `isGeneratedSystemFile` is a value import, not `import type` — but it's only
+// ever called from `loader`, below, which React Router splits into the
+// server-only chunk. Calling it from the component body instead would drag
+// `~/lib/services/configs`'s side-effectful imports (bun:sqlite via
+// `~/lib/db/connection`, `fs`) into the client bundle — the same hazard
+// documented for the parser barrel in the model-highlight work.
+import { isGeneratedSystemFile, type ConfigEditPreview } from "~/lib/services/configs";
 import type { Refusal } from "~/lib/nginx/reverse/classify";
 
 const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
@@ -35,7 +41,11 @@ export function meta() {
 export async function loader({ request }: Route.LoaderArgs) {
   await requireEditor(request);
   const files = listConfigFiles(NGINX_DIR);
-  return { files, baseDir: NGINX_DIR };
+  // Computed here (server-only) rather than in the component, so the check
+  // — and everything `~/lib/services/configs` pulls in to make it — never
+  // reaches the client bundle. See the import comment above.
+  const generatedFiles = files.filter((f) => isGeneratedSystemFile(f));
+  return { files, baseDir: NGINX_DIR, generatedFiles };
 }
 
 // ── Types ────────────────────────────────────────────────
@@ -84,13 +94,16 @@ const CHANGE_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function ConfigsPage() {
-  const { files, baseDir } = useLoaderData<typeof loader>();
+  const { files, baseDir, generatedFiles } = useLoaderData<typeof loader>();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [editorMode, setEditorMode] = useState<"code" | "block">("code");
   const [loading, setLoading] = useState(false);
   const dirty = content !== originalContent;
+  // Generated system files (admin.conf, status.conf, default.conf) stay
+  // fully editable — this only drives the ApplyDialog's warning banner.
+  const generatedWarning = selectedFile !== null && generatedFiles.includes(selectedFile);
 
   // Version history state
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -563,7 +576,7 @@ export default function ConfigsPage() {
       <ApplyDialog
         open={applyDialogOpen}
         preview={preview}
-        generatedWarning={false}
+        generatedWarning={generatedWarning}
         onApply={handleApplyConfirm}
         onCancel={handleCancelApply}
         onJumpToLine={handleJumpToLine}

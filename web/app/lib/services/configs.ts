@@ -488,6 +488,32 @@ export function applyConfigEdit(
   return { ...result, applied: c.edits };
 }
 
+/**
+ * Filenames `generateAllConfigs()` writes into `HOST_CONF_DIR` (`conf.d/`)
+ * that have no per-host model behind them: `admin.conf` (generator.ts:201),
+ * `status.conf` (generator.ts:222), `default.conf` (generator.ts:264).
+ *
+ * `nginx.conf` (generator.ts:162) is deliberately excluded — it is written
+ * under `NGINX_CONF_DIR` (`/etc/nginx` by default), not `NGINX_DIR`
+ * (`/data/nginx`), and the editor can only ever open paths under `NGINX_DIR`
+ * (see `resolveConfigPath`/`nginxDir` above). Flagging it would describe a
+ * file this warning can never actually reach.
+ */
+const GENERATED_SYSTEM_FILES = new Set(["admin.conf", "status.conf", "default.conf"]);
+
+/**
+ * True when `filePath` is one of the fully-generated system files that
+ * `generateAllConfigs()` overwrites on every host create/toggle/delete.
+ * These files stay fully editable — this drives a warning banner in the
+ * confirmation dialog only, never a refusal or a read-only lock.
+ *
+ * Matches on the basename alone (not the full resolved path), so the check
+ * survives a different `NGINX_DIR`/`DATA_NGINX_DIR` root.
+ */
+export function isGeneratedSystemFile(filePath: string): boolean {
+  return GENERATED_SYSTEM_FILES.has(basename(filePath));
+}
+
 export function deleteConfig(auth: AuthContext, filePath: string): { deleted: true } {
   requireScope(auth, "configs:publish");
   const livePath = resolveConfigPath(filePath, { allowDraft: true });
