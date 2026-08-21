@@ -321,7 +321,7 @@ function generateHostAuthFiles() {
 
 // ─── Helpers ─────────────────────────────────────────────
 
-function mapHostToConfig(host: typeof hosts.$inferSelect, dnsResolver: string, dnsResolverValid: string): HostConfig {
+export function mapHostToConfig(host: typeof hosts.$inferSelect, dnsResolver: string, dnsResolverValid: string): HostConfig {
   // Determine error pages directory
   let errorPagesDir: string | null = null;
   const hostErrorDir = `/data/error-pages/host-${host.id}`;
@@ -368,6 +368,7 @@ function mapHostToConfig(host: typeof hosts.$inferSelect, dnsResolver: string, d
       headers: loc.headers ?? {},
       accessListId: loc.accessListId ?? null,
       basicAuth: loc.basicAuth ?? null,
+      advanced: loc.advanced,
     })),
     advancedNginx: host.advancedNginx,
     webhookUrl: host.webhookUrl,
@@ -375,10 +376,11 @@ function mapHostToConfig(host: typeof hosts.$inferSelect, dnsResolver: string, d
     basicAuth: (host as any).basicAuth ?? null,
     dnsResolver: dnsResolver || null,
     dnsResolverValid: dnsResolverValid || null,
+    customPrelude: host.customPrelude,
   };
 }
 
-function loadAccessLists(): Map<number, AccessListWithRules> {
+export function loadAccessLists(): Map<number, AccessListWithRules> {
   const map = new Map<number, AccessListWithRules>();
   const lists = db.select().from(accessLists).all();
 

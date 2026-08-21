@@ -7,13 +7,23 @@ import {
   readdirSync,
   realpathSync,
 } from "fs";
-import { resolve, dirname, join } from "path";
+import { resolve, dirname, join, basename } from "path";
+import { eq } from "drizzle-orm";
 import type { AuthContext } from "~/lib/auth/authenticate";
-import { requireScope, InvalidPathError, NotFoundError } from "./errors";
+import { requireScope, InvalidPathError, NotFoundError, ConfigClassificationError } from "./errors";
 import { saveVersion } from "~/lib/config/versions";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { logAudit } from "~/lib/audit/log";
+import { db } from "~/lib/db/connection";
+import { hosts, settings } from "~/lib/db/schema";
+import { mapHostToConfig, loadAccessLists } from "~/lib/nginx/generator";
+import { buildServerBlock, type HostConfig } from "~/lib/nginx/templates/server-block";
+import { parse } from "~/lib/nginx/parser";
+import { diffAst } from "~/lib/nginx/reverse/match";
+import { classifyDelta, type ClassifiedEdit, type Refusal } from "~/lib/nginx/reverse/classify";
+import { syntaxError } from "~/lib/nginx/reverse/syntax";
+import { applyEdits } from "~/lib/nginx/reverse/apply";
 
 const DRAFT_SUFFIX = ".draft";
 
@@ -268,6 +278,199 @@ export function publishConfig(auth: AuthContext, filePath: string): PublishResul
     details: auditDetails(auth, { filePath: livePath, published: true }),
   });
   return { published: true, valid: true };
+}
+
+// ─── Reverse-sync: hand-edited config → host model ──────
+
+export interface ConfigEditPreview {
+  hostId: number;
+  edits: ClassifiedEdit[];
+  refusals: Refusal[];
+}
+
+interface ClassifyResult {
+  hostId: number;
+  hostConfig: HostConfig;
+  edits: ClassifiedEdit[];
+  refusals: Refusal[];
+}
+
+const DRAFT_REFUSAL_REASON =
+  "This host has an unpublished draft. Publish or discard it before editing the file.";
+
+/**
+ * Render the server block for a host row exactly as `generateAllConfigs`
+ * would, so the reverse-sync diff compares like with like. Not pure: reads
+ * DNS settings and probes the error-pages directory (via `mapHostToConfig`).
+ */
+function renderHost(row: typeof hosts.$inferSelect): string {
+  const dnsResolver = db.select().from(settings).where(eq(settings.key, "dns_resolver")).get()?.value || "";
+  const dnsResolverValid =
+    db.select().from(settings).where(eq(settings.key, "dns_resolver_valid")).get()?.value || "30s";
+  const accessListMap = loadAccessLists();
+  return buildServerBlock(mapHostToConfig(row, dnsResolver, dnsResolverValid), accessListMap);
+}
+
+/**
+ * Shared by `previewConfigEdit` and `applyConfigEdit` so classification can
+ * never drift between the two. Returns `null` when `filePath` isn't a
+ * managed `host-<id>.conf` file (or no such host row exists) — the caller
+ * falls back to a plain `writeConfigLive`.
+ */
+function classifyFor(filePath: string, content: string): ClassifyResult | null {
+  const livePath = resolveConfigPath(filePath);
+  const m = /^host-(\d+)\.conf$/.exec(basename(livePath));
+  if (!m) return null;
+  const hostId = Number(m[1]);
+
+  const row = db.select().from(hosts).where(eq(hosts.id, hostId)).get();
+  if (!row) return null;
+
+  if (row.draft !== null) {
+    throw new ConfigClassificationError([{ line: 0, directive: "", reason: DRAFT_REFUSAL_REASON }]);
+  }
+
+  const problem = syntaxError(content);
+  if (problem) {
+    return {
+      hostId,
+      hostConfig: mapHostToConfig(row, "", "30s"),
+      edits: [],
+      refusals: [{ line: problem.line, directive: "", reason: problem.message }],
+    };
+  }
+
+  const dnsResolver = db.select().from(settings).where(eq(settings.key, "dns_resolver")).get()?.value || "";
+  const dnsResolverValid =
+    db.select().from(settings).where(eq(settings.key, "dns_resolver_valid")).get()?.value || "30s";
+  const hostConfig = mapHostToConfig(row, dnsResolver, dnsResolverValid);
+
+  const expected = parse(renderHost(row));
+  const actual = parse(content);
+  const delta = diffAst(expected, actual);
+  const { edits, refusals } = classifyDelta(delta, hostConfig);
+
+  return { hostId, hostConfig, edits, refusals };
+}
+
+/**
+ * Builds the DB column patch for a batch of classified edits. Location-shaped
+ * edits (field/advanced/removed/added) all land in the single `locations`
+ * JSON column, so any one of them touches the whole array.
+ */
+function touchedColumns(edits: ClassifiedEdit[], updated: HostConfig): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const edit of edits) {
+    switch (edit.kind) {
+      case "field":
+        patch[edit.field] = (updated as unknown as Record<string, unknown>)[edit.field];
+        break;
+      case "location-field":
+      case "location-advanced":
+      case "location-removed":
+      case "location-added":
+        patch.locations = updated.locations;
+        break;
+      case "prelude":
+        patch.customPrelude = updated.customPrelude;
+        break;
+      case "server-advanced":
+        patch.advancedNginx = updated.advancedNginx;
+        break;
+    }
+  }
+  return patch;
+}
+
+/** Per-edit audit detail shape: `{ field, from, to, source: "config-editor" }`. */
+function auditFieldFor(edit: ClassifiedEdit): { field: string; from: unknown; to: unknown; source: string } {
+  const source = "config-editor";
+  switch (edit.kind) {
+    case "field":
+      return { field: edit.field, from: edit.from, to: edit.to, source };
+    case "location-field":
+      return { field: `locations[${edit.index}].${edit.field}`, from: edit.from, to: edit.to, source };
+    case "location-advanced":
+      return { field: `locations[${edit.index}].advanced`, from: null, to: edit.text, source };
+    case "location-removed":
+      return { field: `locations[${edit.index}]`, from: edit.label, to: null, source };
+    case "location-added":
+      return {
+        field: "locations[+]",
+        from: null,
+        to: { path: edit.path, matchType: edit.matchType, type: edit.type },
+        source,
+      };
+    case "prelude":
+      return { field: "customPrelude", from: null, to: edit.text, source };
+    case "server-advanced":
+      return { field: "advancedNginx", from: null, to: edit.text, source };
+  }
+}
+
+/**
+ * Classify a hand-edited config against the host model without applying
+ * anything. Used by the editor to show a confirmation dialog before saving.
+ */
+export function previewConfigEdit(auth: AuthContext, filePath: string, content: string): ConfigEditPreview {
+  requireScope(auth, "configs:read");
+  const c = classifyFor(filePath, content);
+  if (c === null) return { hostId: -1, edits: [], refusals: [] };
+  return { hostId: c.hostId, edits: c.edits, refusals: c.refusals };
+}
+
+/**
+ * Reverse-sync a hand-edited config back into the host model, then write the
+ * regenerated file through `writeConfigLive` so `nginx -t` still guards the
+ * live path. If any change can't be mapped, nothing is written; if the
+ * regenerated config fails validation, both the DB update and the file write
+ * are rolled back.
+ */
+export function applyConfigEdit(
+  auth: AuthContext,
+  filePath: string,
+  content: string
+): LiveWriteResult & { applied: ClassifiedEdit[] } {
+  requireScope(auth, "hosts:publish");
+
+  const c = classifyFor(filePath, content);
+  if (c === null) {
+    return { ...writeConfigLive(auth, filePath, content), applied: [] };
+  }
+  if (c.refusals.length > 0) {
+    throw new ConfigClassificationError(c.refusals);
+  }
+
+  const updated = applyEdits(c.hostConfig, c.edits);
+  const patch = touchedColumns(c.edits, updated);
+
+  let result!: LiveWriteResult;
+  db.transaction((tx) => {
+    tx.update(hosts)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(hosts.id, c.hostId))
+      .run();
+    const row = tx.select().from(hosts).where(eq(hosts.id, c.hostId)).get()!;
+    const regenerated = renderHost(row);
+    result = writeConfigLive(auth, filePath, regenerated);
+    if (!result.valid) {
+      throw new ConfigClassificationError([
+        { line: 0, directive: "", reason: `Regenerated config failed nginx -t: ${result.error}` },
+      ]);
+    }
+  });
+
+  for (const edit of c.edits) {
+    logAudit({
+      userId: auth.userId,
+      action: "update",
+      entity: "host",
+      entityId: c.hostId,
+      details: auditDetails(auth, auditFieldFor(edit)),
+    });
+  }
+
+  return { ...result, applied: c.edits };
 }
 
 export function deleteConfig(auth: AuthContext, filePath: string): { deleted: true } {

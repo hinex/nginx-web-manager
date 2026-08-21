@@ -1,5 +1,6 @@
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
+import type { Refusal } from "~/lib/nginx/reverse/classify";
 
 export class ForbiddenError extends Error {
   missingScope: Scope;
@@ -37,6 +38,13 @@ export class InputValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InputValidationError";
+  }
+}
+
+export class ConfigClassificationError extends Error {
+  constructor(public refusals: Refusal[]) {
+    super("Config changes could not be mapped to the host model");
+    this.name = "ConfigClassificationError";
   }
 }
 

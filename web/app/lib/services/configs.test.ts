@@ -15,6 +15,115 @@ vi.mock("~/lib/nginx/validator", () => ({ validateNginxConfig: vi.fn(() => ({ va
 vi.mock("~/lib/nginx/reload", () => ({ reloadNginx: vi.fn(() => true) }));
 vi.mock("~/lib/audit/log", () => ({ logAudit: vi.fn() }));
 
+// ── Reverse-sync fixtures & DB mock ──
+//
+// `configs.ts` imports `~/lib/db/connection` (a real bun:sqlite Database at
+// module load time) and `~/lib/nginx/generator` (mapHostToConfig/loadAccessLists,
+// which themselves touch the DB). Both must be mocked here. `mapHostToConfig`
+// is stubbed with `rowToHostConfig` below rather than re-tested — that mapping
+// is generator.ts's own responsibility (generator.test.ts covers it); this
+// suite is about configs.ts's orchestration.
+const { hostsStore, settingsStore, rowToHostConfig } = vi.hoisted(() => {
+  const hostsStore = new Map<number, any>();
+  const settingsStore = new Map<string, string>();
+  function rowToHostConfig(row: any, dnsResolver = "", dnsResolverValid = "30s") {
+    return {
+      id: row.id,
+      groupId: row.groupId ?? null,
+      domains: row.domains ?? [],
+      enabled: row.enabled ?? true,
+      sslType: row.sslType ?? "none",
+      sslForceHttps: row.sslForceHttps ?? false,
+      sslCertPath: row.sslCertPath ?? null,
+      sslKeyPath: row.sslKeyPath ?? null,
+      hsts: row.hsts ?? true,
+      http2: row.http2 ?? true,
+      compression: row.compression ?? true,
+      redirectWww: row.redirectWww ?? false,
+      clientMaxBodySize: row.clientMaxBodySize ?? "1m",
+      locations: (row.locations ?? []).map((loc: any) => ({ ...loc })),
+      advancedNginx: row.advancedNginx ?? null,
+      webhookUrl: row.webhookUrl ?? null,
+      errorPagesDir: null,
+      basicAuth: row.basicAuth ?? null,
+      dnsResolver: dnsResolver || null,
+      dnsResolverValid: dnsResolverValid || null,
+      customPrelude: row.customPrelude ?? null,
+    };
+  }
+  return { hostsStore, settingsStore, rowToHostConfig };
+});
+
+vi.mock("drizzle-orm", () => ({
+  eq: vi.fn((_col: any, val: any) => ({ __eq: true, val })),
+}));
+
+vi.mock("~/lib/nginx/generator", () => ({
+  mapHostToConfig: vi.fn((row: any, dnsResolver: string, dnsResolverValid: string) =>
+    rowToHostConfig(row, dnsResolver, dnsResolverValid)
+  ),
+  loadAccessLists: vi.fn(() => new Map()),
+}));
+
+vi.mock("~/lib/db/connection", () => {
+  function makeQueryable() {
+    return {
+      select() {
+        return {
+          from() {
+            return {
+              where(cond: any) {
+                return {
+                  get() {
+                    if (typeof cond.val === "number") {
+                      const row = hostsStore.get(cond.val);
+                      return row ? { ...row } : undefined;
+                    }
+                    if (typeof cond.val === "string") {
+                      const v = settingsStore.get(cond.val);
+                      return v !== undefined ? { key: cond.val, value: v } : undefined;
+                    }
+                    return undefined;
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+      update() {
+        return {
+          set(patch: any) {
+            return {
+              where(cond: any) {
+                return {
+                  run() {
+                    const existing = hostsStore.get(cond.val);
+                    if (existing) hostsStore.set(cond.val, { ...existing, ...patch });
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  function transaction(cb: (tx: any) => void) {
+    const snapshot = new Map([...hostsStore.entries()].map(([k, v]: [number, any]) => [k, { ...v }]));
+    try {
+      cb(makeQueryable());
+    } catch (err) {
+      hostsStore.clear();
+      for (const [k, v] of snapshot) hostsStore.set(k, v);
+      throw err;
+    }
+  }
+
+  return { db: { ...makeQueryable(), transaction } };
+});
+
 import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync, realpathSync } from "fs";
 import { saveVersion } from "~/lib/config/versions";
 import { validateNginxConfig } from "~/lib/nginx/validator";
@@ -22,7 +131,8 @@ import { reloadNginx } from "~/lib/nginx/reload";
 import { logAudit } from "~/lib/audit/log";
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
-import { ForbiddenError, InvalidPathError, NotFoundError } from "./errors";
+import { ForbiddenError, InvalidPathError, NotFoundError, ConfigClassificationError } from "./errors";
+import { buildServerBlock } from "~/lib/nginx/templates/server-block";
 import {
   resolveConfigPath,
   readConfig,
@@ -31,6 +141,8 @@ import {
   publishConfig,
   deleteConfig,
   listConfigs,
+  previewConfigEdit,
+  applyConfigEdit,
 } from "./configs";
 
 const ctx = (scopes: Scope[]): AuthContext => ({
@@ -316,5 +428,214 @@ describe("deleteConfig", () => {
     );
     expect(unlinkSync).toHaveBeenCalledWith(LIVE);
     expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "delete" }));
+  });
+});
+
+describe("previewConfigEdit / applyConfigEdit", () => {
+  const auth = ctx(["configs:read", "configs:write", "configs:publish", "hosts:publish"]);
+
+  function makeHostRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 1,
+      groupId: null,
+      domains: ["example.com"],
+      enabled: true,
+      sslType: "none",
+      sslForceHttps: false,
+      sslCertPath: null,
+      sslKeyPath: null,
+      hsts: true,
+      http2: true,
+      compression: true,
+      redirectWww: false,
+      clientMaxBodySize: "5m",
+      locations: [
+        {
+          path: "/",
+          matchType: "prefix",
+          type: "proxy",
+          upstreams: [{ server: "10.0.0.1", port: 8080, weight: 1 }],
+          balanceMethod: "round_robin",
+          staticDir: "",
+          cacheExpires: "",
+          forwardScheme: "http",
+          forwardDomain: "",
+          forwardPath: "/",
+          preservePath: true,
+          statusCode: 301,
+          headers: {},
+          accessListId: null,
+          basicAuth: null,
+        },
+      ],
+      advancedNginx: null,
+      webhookUrl: null,
+      customPrelude: null,
+      basicAuth: null,
+      draft: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  function baselineText(row: any) {
+    return buildServerBlock(rowToHostConfig(row), new Map());
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NGINX_DIR = "/data/nginx";
+    hostsStore.clear();
+    settingsStore.clear();
+    vi.mocked(validateNginxConfig).mockReturnValue({ valid: true });
+    vi.mocked(reloadNginx).mockReturnValue(true);
+    vi.mocked(existsSync).mockReturnValue(false);
+  });
+
+  it("falls through to a plain live write for a non-host-N.conf path", () => {
+    const result = applyConfigEdit(auth, "conf.d/site.conf", "server { listen 80; }");
+    expect(result.applied).toEqual([]);
+    expect(result.saved).toBe(true);
+    expect(writeFileSync).toHaveBeenCalledWith("/data/nginx/conf.d/site.conf", "server { listen 80; }");
+  });
+
+  it("throws ConfigClassificationError mentioning the draft when the host has one", () => {
+    hostsStore.set(1, makeHostRow({ draft: { some: "change" } }));
+    expect(() => applyConfigEdit(auth, "conf.d/host-1.conf", "server {}")).toThrow(ConfigClassificationError);
+    try {
+      applyConfigEdit(auth, "conf.d/host-1.conf", "server {}");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(ConfigClassificationError);
+      expect((err as ConfigClassificationError).refusals[0].reason).toMatch(/draft/i);
+    }
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("throws ConfigClassificationError with a line number for unparseable content", () => {
+    hostsStore.set(1, makeHostRow());
+    let caught: ConfigClassificationError | undefined;
+    try {
+      applyConfigEdit(auth, "conf.d/host-1.conf", "server {\n  listen 80;\n");
+    } catch (err) {
+      caught = err as ConfigClassificationError;
+    }
+    expect(caught).toBeInstanceOf(ConfigClassificationError);
+    expect(caught!.refusals).toHaveLength(1);
+    expect(caught!.refusals[0].line).toBe(1);
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("throws and writes nothing for a refusal (letsencrypt cert path changed)", () => {
+    const row = makeHostRow({ sslType: "letsencrypt" });
+    hostsStore.set(1, row);
+    const baseline = baselineText(row);
+    const actual = baseline.replace(
+      "/etc/letsencrypt/live/example.com/fullchain.pem",
+      "/etc/ssl/custom/fullchain.pem"
+    );
+    expect(actual).not.toBe(baseline);
+
+    let caught: ConfigClassificationError | undefined;
+    try {
+      applyConfigEdit(auth, "conf.d/host-1.conf", actual);
+    } catch (err) {
+      caught = err as ConfigClassificationError;
+    }
+    expect(caught).toBeInstanceOf(ConfigClassificationError);
+    expect(caught!.refusals.length).toBeGreaterThan(0);
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(hostsStore.get(1)).toEqual(row);
+  });
+
+  it("updates the DB and writes the regenerated (canonical) file for a clean edit", () => {
+    const row = makeHostRow({ clientMaxBodySize: "5m" });
+    hostsStore.set(1, row);
+    const baseline = baselineText(row);
+    // Cosmetic whitespace difference (extra space) on an unrelated line, plus
+    // the real value change — proves the write is regenerated, not the raw
+    // user text, since diffAst treats "listen  80;"/"listen 80;" identically.
+    const actual = baseline
+      .replace("client_max_body_size 5m;", "client_max_body_size 50m;")
+      .replace("listen 80;", "listen  80;");
+
+    const result = applyConfigEdit(auth, "conf.d/host-1.conf", actual);
+
+    expect(result.saved).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.applied).toHaveLength(1);
+    expect(result.applied[0]).toMatchObject({ kind: "field", field: "clientMaxBodySize", to: "50m" });
+    expect(hostsStore.get(1).clientMaxBodySize).toBe("50m");
+
+    const writes = vi.mocked(writeFileSync).mock.calls;
+    const finalWrite = writes[writes.length - 1];
+    expect(finalWrite[0]).toBe("/data/nginx/conf.d/host-1.conf");
+    expect(finalWrite[1]).toContain("client_max_body_size 50m;");
+    expect(finalWrite[1]).not.toBe(actual);
+  });
+
+  it("rolls back the DB and restores the file when the regenerated config fails nginx -t", () => {
+    const row = makeHostRow({ clientMaxBodySize: "5m" });
+    hostsStore.set(1, row);
+    const baseline = baselineText(row);
+    const actual = baseline.replace("client_max_body_size 5m;", "client_max_body_size 50m;");
+
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(baseline as never);
+    vi.mocked(validateNginxConfig).mockReturnValue({ valid: false, error: "unknown directive" });
+
+    expect(() => applyConfigEdit(auth, "conf.d/host-1.conf", actual)).toThrow(ConfigClassificationError);
+
+    // DB rolled back
+    expect(hostsStore.get(1).clientMaxBodySize).toBe("5m");
+    // file restored to the original as the last write
+    const writes = vi.mocked(writeFileSync).mock.calls;
+    expect(writes[writes.length - 1]).toEqual(["/data/nginx/conf.d/host-1.conf", baseline]);
+    expect(reloadNginx).not.toHaveBeenCalled();
+  });
+
+  it("logs one audit row per edit, each carrying source config-editor", () => {
+    const row = makeHostRow({ clientMaxBodySize: "5m" });
+    hostsStore.set(1, row);
+    const baseline = baselineText(row);
+    const actual = baseline.replace("client_max_body_size 5m;", "client_max_body_size 50m;");
+
+    applyConfigEdit(auth, "conf.d/host-1.conf", actual);
+
+    const hostAuditCalls = vi.mocked(logAudit).mock.calls.filter(([args]) => args.entity === "host");
+    expect(hostAuditCalls).toHaveLength(1);
+    expect(hostAuditCalls[0][0]).toMatchObject({
+      action: "update",
+      entity: "host",
+      entityId: 1,
+      details: expect.objectContaining({ source: "config-editor" }),
+    });
+  });
+
+  it("requires hosts:publish", () => {
+    hostsStore.set(1, makeHostRow());
+    const viewer = { via: "session", userId: 2, scopes: ["configs:read"] } as AuthContext;
+    expect(() => applyConfigEdit(viewer, "conf.d/host-1.conf", "server {}")).toThrow(ForbiddenError);
+  });
+
+  it("previewConfigEdit classifies without writing or mutating the DB", () => {
+    const row = makeHostRow({ clientMaxBodySize: "5m" });
+    hostsStore.set(1, row);
+    const baseline = baselineText(row);
+    const actual = baseline.replace("client_max_body_size 5m;", "client_max_body_size 50m;");
+
+    const preview = previewConfigEdit(auth, "conf.d/host-1.conf", actual);
+
+    expect(preview.hostId).toBe(1);
+    expect(preview.edits).toHaveLength(1);
+    expect(preview.refusals).toEqual([]);
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(hostsStore.get(1)).toEqual(row);
+  });
+
+  it("previewConfigEdit requires configs:read", () => {
+    hostsStore.set(1, makeHostRow());
+    expect(() => previewConfigEdit(ctx([]), "conf.d/host-1.conf", "server {}")).toThrow(ForbiddenError);
   });
 });

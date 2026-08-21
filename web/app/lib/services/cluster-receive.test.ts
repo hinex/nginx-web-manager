@@ -13,6 +13,8 @@ vi.mock("~/lib/nginx/validator", () => ({ validateNginxConfig: vi.fn(() => ({ va
 vi.mock("~/lib/nginx/reload", () => ({ reloadNginx: vi.fn(() => true) }));
 vi.mock("~/lib/config/versions", () => ({ saveVersion: vi.fn() }));
 vi.mock("~/lib/audit/log", () => ({ logAudit: vi.fn() }));
+vi.mock("~/lib/db/connection", () => ({ db: {} }));
+vi.mock("~/lib/nginx/generator", () => ({ mapHostToConfig: vi.fn(), loadAccessLists: vi.fn() }));
 
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { validateNginxConfig } from "~/lib/nginx/validator";
