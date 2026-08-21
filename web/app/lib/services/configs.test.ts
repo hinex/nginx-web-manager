@@ -626,6 +626,20 @@ describe("previewConfigEdit / applyConfigEdit", () => {
     expect(() => applyConfigEdit(viewer, "conf.d/host-1.conf", "server {}")).toThrow(ForbiddenError);
   });
 
+  it("does not require hosts:publish to write a plain non-host config file", () => {
+    const configOnly = ctx(["configs:read", "configs:write", "configs:publish"]);
+    const result = applyConfigEdit(configOnly, "conf.d/site.conf", "server { listen 80; }");
+    expect(result.saved).toBe(true);
+    expect(writeFileSync).toHaveBeenCalledWith("/data/nginx/conf.d/site.conf", "server { listen 80; }");
+  });
+
+  it("rejects a caller without configs:publish before it parses or reads the host", () => {
+    hostsStore.set(1, makeHostRow({ draft: { some: "change" } }));
+    const reader = ctx(["configs:read", "hosts:publish"]);
+    expect(() => applyConfigEdit(reader, "conf.d/host-1.conf", "server {}")).toThrow(ForbiddenError);
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
   it("previewConfigEdit classifies without writing or mutating the DB", () => {
     const row = makeHostRow({ clientMaxBodySize: "5m" });
     hostsStore.set(1, row);

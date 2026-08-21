@@ -437,12 +437,21 @@ export function applyConfigEdit(
   filePath: string,
   content: string
 ): LiveWriteResult & { applied: ClassifiedEdit[] } {
-  requireScope(auth, "hosts:publish");
+  // Writing any live config file needs `configs:publish` — that is what the
+  // plain path has always required. Check it before classifying so an
+  // unprivileged caller can't provoke a parse or learn a host's draft state
+  // from the error. `hosts:publish` is demanded only once we know this file
+  // really is a managed host and the write will mutate the host model;
+  // editing a hand-written `conf.d/*.conf` must not require host rights.
+  requireScope(auth, "configs:publish");
 
   const c = classifyFor(filePath, content);
   if (c === null) {
     return { ...writeConfigLive(auth, filePath, content), applied: [] };
   }
+
+  requireScope(auth, "hosts:publish");
+
   if (c.refusals.length > 0) {
     throw new ConfigClassificationError(c.refusals);
   }
