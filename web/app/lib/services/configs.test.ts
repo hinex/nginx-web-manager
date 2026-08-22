@@ -217,7 +217,15 @@ describe("writeConfigDraft", () => {
     vi.mocked(existsSync).mockImplementation((p) => p === LIVE);
     vi.mocked(readFileSync).mockReturnValue("old content" as any);
     const result = writeConfigDraft(ctx(["configs:write"]), LIVE, "new content");
-    expect(result).toEqual({ draftPath: DRAFT, valid: true, error: undefined });
+    // hostId/edits are part of DraftWriteResult now: LIVE is an unmanaged
+    // path, so it stays on the plain draft path with nothing classified.
+    expect(result).toEqual({
+      draftPath: DRAFT,
+      valid: true,
+      error: undefined,
+      hostId: null,
+      edits: undefined,
+    });
     expect(saveVersion).toHaveBeenCalledWith(
       expect.objectContaining({ filePath: LIVE, content: "old content", userId: 1 })
     );
@@ -660,6 +668,43 @@ describe("previewConfigEdit / applyConfigEdit", () => {
   it("previewConfigEdit requires configs:read", () => {
     hostsStore.set(1, makeHostRow());
     expect(() => previewConfigEdit(ctx([]), "conf.d/host-1.conf", "server {}")).toThrow(ForbiddenError);
+  });
+
+  // ── writeConfigDraft classifies before it writes ──
+  //
+  // A hand edit that cannot be mapped back to the host model must be refused
+  // with an exact line number *before* anything is written. Putting the check
+  // inside writeConfigDraft fixes both surfaces at once, because the API and
+  // MCP write paths are its only non-test callers.
+
+  it("refuses an unmappable draft for a managed host file", () => {
+    hostsStore.set(1, makeHostRow());
+    const baseline = baselineText(makeHostRow());
+    const actual = baseline.replace("server {", "server {\n    resolver 8.8.8.8;");
+    expect(() => writeConfigDraft(auth, "conf.d/host-1.conf", actual)).toThrow(
+      ConfigClassificationError
+    );
+    expect(writeFileSync).not.toHaveBeenCalled(); // no .draft file either
+  });
+
+  it("returns the classified edits alongside a valid managed draft", () => {
+    hostsStore.set(1, makeHostRow({ clientMaxBodySize: "5m" }));
+    const actual = baselineText(makeHostRow({ clientMaxBodySize: "5m" })).replace(
+      "client_max_body_size 5m;",
+      "client_max_body_size 50m;"
+    );
+    const r = writeConfigDraft(auth, "conf.d/host-1.conf", actual);
+    expect(r.edits).toContainEqual(
+      expect.objectContaining({ field: "clientMaxBodySize", to: "50m" })
+    );
+    expect(r.hostId).toBe(1);
+  });
+
+  it("leaves an unmanaged conf.d file on the plain draft path", () => {
+    const r = writeConfigDraft(auth, "conf.d/site.conf", "server { listen 80; }");
+    expect(r.edits).toBeUndefined();
+    expect(r.hostId).toBeNull();
+    expect(writeFileSync).toHaveBeenCalled();
   });
 });
 

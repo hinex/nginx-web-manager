@@ -274,6 +274,29 @@ describe("PUT /api/v1/configs/file", () => {
     assertJson(res);
   });
 
+  it("passes the classified edits through to the response body", async () => {
+    vi.mocked(configsService.writeConfigDraft).mockReturnValue({
+      draftPath: "/data/nginx/conf.d/host-1.conf.draft",
+      valid: true,
+      hostId: 1,
+      edits: [
+        { kind: "field", field: "clientMaxBodySize", from: "5m", to: "50m", label: "client_max_body_size 5m → 50m" },
+      ],
+    });
+    const req = makeRequest(
+      "PUT",
+      "http://localhost/api/v1/configs/file?path=/data/nginx/conf.d/host-1.conf",
+      { content: "..." }
+    );
+    const res = await configFileAction({ request: req, params: {} });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.hostId).toBe(1);
+    expect(body.edits).toEqual([
+      expect.objectContaining({ field: "clientMaxBodySize", to: "50m" }),
+    ]);
+  });
+
   it("maps a classification refusal to 409 with line-numbered refusals", async () => {
     vi.mocked(configsService.writeConfigDraft).mockImplementation(() => {
       throw new ConfigClassificationError([

@@ -141,6 +141,24 @@ describe("handleToolCall", () => {
     expect(r.content[0].text).toContain("publish_config");
   });
 
+  it("lists the model changes publishing a managed host draft will apply", async () => {
+    vi.mocked(configsService.writeConfigDraft).mockReturnValue({
+      draftPath: "/data/nginx/conf.d/host-1.conf.draft",
+      valid: true,
+      hostId: 1,
+      edits: [
+        { kind: "field", field: "clientMaxBodySize", from: "5m", to: "50m", label: "client_max_body_size 5m → 50m" },
+      ],
+    });
+    const r = await handleToolCall(ctx(["configs:write"]), "write_config", {
+      path: "conf.d/host-1.conf",
+      content: "...",
+    });
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain("Publishing will apply 1 change(s) to host 1");
+    expect(r.content[0].text).toContain("client_max_body_size 5m → 50m");
+  });
+
   it("renders classification refusals as one line each, not an opaque error", async () => {
     vi.mocked(configsService.writeConfigDraft).mockImplementation(() => {
       throw new ConfigClassificationError([

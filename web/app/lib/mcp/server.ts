@@ -56,7 +56,7 @@ export const tools: McpTool[] = [
     name: "write_config",
     requiredScope: "configs:write",
     description:
-      "Write config content as a DRAFT (<path>.draft) and run nginx -t against it. Never touches the live config; to go live use publish_config or the web UI.",
+      "Write config content as a DRAFT (<path>.draft) and run nginx -t against it. Never touches the live config; to go live use publish_config or the web UI. Editing a managed host-<id>.conf is reverse-synced to the host on publish: the draft is refused up-front (with line numbers) if any change cannot be mapped back to the host model.",
     inputSchema: {
       type: "object",
       properties: {
@@ -240,13 +240,20 @@ export async function handleToolCall(
         return textResult(configsService.readConfig(auth, args.path));
       case "write_config": {
         const r = configsService.writeConfigDraft(auth, args.path, args.content, args.message);
-        return textResult(
-          [
-            `Draft saved: ${r.draftPath}`,
-            r.valid ? "nginx -t: OK" : `nginx -t: FAILED — ${r.error}`,
-            "Live config untouched. To apply: publish_config (requires configs:publish) or publish from the web UI.",
-          ].join("\n")
-        );
+        const lines = [
+          `Draft saved: ${r.draftPath}`,
+          r.valid ? "nginx -t: OK" : `nginx -t: FAILED — ${r.error}`,
+          "Live config untouched. To apply: publish_config (requires configs:publish) or publish from the web UI.",
+        ];
+        if (r.edits && r.edits.length > 0) {
+          // A managed host file: say which model fields publishing will move,
+          // so the agent can see the reverse-sync before triggering it.
+          lines.push(
+            `Publishing will apply ${r.edits.length} change(s) to host ${r.hostId}:`,
+            ...r.edits.map((e) => `  ${e.label}`)
+          );
+        }
+        return textResult(lines.join("\n"));
       }
       case "publish_config": {
         const r = configsService.publishConfig(auth, args.path);

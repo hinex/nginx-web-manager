@@ -122,6 +122,13 @@ export interface DraftWriteResult {
   draftPath: string;
   valid: boolean;
   error?: string;
+  /**
+   * The host this file belongs to, or `null` for an unmanaged config. When
+   * non-null, `edits` lists how the submitted text maps back onto the host
+   * model — the draft is not live, so nothing has been applied yet.
+   */
+  hostId?: number | null;
+  edits?: ClassifiedEdit[];
 }
 
 export function writeConfigDraft(
@@ -134,6 +141,21 @@ export function writeConfigDraft(
   if (typeof content !== "string") throw new Error("content must be a string");
   const livePath = resolveConfigPath(filePath);
   const draftPath = livePath + DRAFT_SUFFIX;
+
+  // Classify BEFORE anything is persisted. A hand edit to a managed
+  // host-<id>.conf that cannot be mapped back to the model is refused here
+  // with an exact line number, so the refusal reaches every caller (API, MCP)
+  // instead of being discovered only at publish time — or never, if the next
+  // generateAllConfigs() silently overwrites it. `null` means the path is not
+  // a managed host file: unchanged plain-draft behaviour.
+  //
+  // Note this deliberately does NOT call previewConfigEdit: that requires
+  // `configs:read`, which a write-only token need not carry. The draft path
+  // keeps demanding exactly the `configs:write` the caller already had.
+  const classified = classifyFor(filePath, content);
+  if (classified && classified.refusals.length > 0) {
+    throw new ConfigClassificationError(classified.refusals);
+  }
 
   const original = existsSync(livePath) ? readFileSync(livePath, "utf-8") : null;
   if (original !== null) {
@@ -171,6 +193,8 @@ export function writeConfigDraft(
     draftPath,
     valid: validation!.valid,
     error: validation!.valid ? undefined : validation!.error,
+    hostId: classified ? classified.hostId : null,
+    edits: classified ? classified.edits : undefined,
   };
 }
 
