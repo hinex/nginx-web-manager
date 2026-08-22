@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-08-23
+## [1.2.0] - 2026-08-23
 
 ### Breaking
 
@@ -154,7 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
-[2.0.0]: https://github.com/hardskilled/nginx-manager/compare/v1.1.1...v2.0.0
+[1.2.0]: https://github.com/hardskilled/nginx-manager/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/hardskilled/nginx-manager/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/hardskilled/nginx-manager/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/hardskilled/nginx-manager/compare/v1.0.0...v1.0.1

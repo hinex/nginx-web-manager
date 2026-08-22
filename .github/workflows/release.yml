@@ -19,7 +19,10 @@ jobs:
         working-directory: web
 
       - name: Run tests
-        run: bun run test
+        # --bun is load-bearing: without it `bun run` executes the vitest binary
+        # through its `#!/usr/bin/env node` shebang, and the suite runs on Node,
+        # where the app's `bun:sqlite` driver cannot resolve.
+        run: bun run --bun test
         working-directory: web
 
   docker:
