@@ -60,6 +60,35 @@ function indexBlocks(blocks: NgxDirective[]): Map<string, NgxDirective> {
   return out;
 }
 
+/**
+ * Directives whose first argument is an identity, not a value.
+ *
+ * Pairing these positionally makes a hand-inserted header masquerade as an edit
+ * to an unrelated one: inserting `add_header X-Frame-Options DENY;` above an
+ * existing `add_header X-Real-IP ...;` yields a bogus "changed" pair plus an
+ * "added" leftover restating the untouched line, so one hand-written line
+ * produces two edits and the second is fabricated (NUANCES §49). Same failure
+ * shape as the block collapse above: identity replaced by position.
+ */
+const KEYED_DIRECTIVES = new Set(["add_header", "proxy_set_header"]);
+
+/**
+ * Key by first arg plus occurrence. The occurrence suffix matters: nginx allows
+ * the same header twice (e.g. two `add_header Set-Cookie`), and a plain Map
+ * keyed on the bare name would keep only the last and drop the first silently.
+ */
+function indexKeyed(list: NgxDirective[]): Map<string, NgxDirective> {
+  const seen = new Map<string, number>();
+  const out = new Map<string, NgxDirective>();
+  for (const d of list) {
+    const base = d.args[0] ?? "";
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    out.set(n === 0 ? base : `${base}#${n}`, d);
+  }
+  return out;
+}
+
 function walk(
   expected: NgxDirective[],
   actual: NgxDirective[],
@@ -87,11 +116,29 @@ function walk(
     if (!actByKey.has(key)) delta.removed.push(toRef(expDir, scope));
   }
 
-  // --- Simple directives: group by name, pair positionally within the group ---
+  // --- Simple directives: group by name, pair within the group ---
   const names = new Set([...expSimple.map((d) => d.name), ...actSimple.map((d) => d.name)]);
   for (const name of names) {
     const exp = expSimple.filter((d) => d.name === name);
     const act = actSimple.filter((d) => d.name === name);
+
+    if (KEYED_DIRECTIVES.has(name)) {
+      const expKeyed = indexKeyed(exp);
+      const actKeyed = indexKeyed(act);
+      for (const [key, a] of actKeyed) {
+        const e = expKeyed.get(key);
+        if (!e) {
+          delta.added.push(toRef(a, scope));
+        } else if (e.args.join(" ") !== a.args.join(" ")) {
+          delta.changed.push({ before: toRef(e, scope), after: toRef(a, scope) });
+        }
+      }
+      for (const [key, e] of expKeyed) {
+        if (!actKeyed.has(key)) delta.removed.push(toRef(e, scope));
+      }
+      continue;
+    }
+
     const shared = Math.min(exp.length, act.length);
 
     for (let i = 0; i < shared; i++) {

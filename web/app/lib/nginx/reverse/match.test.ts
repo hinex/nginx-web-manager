@@ -232,3 +232,52 @@ server {
     expect(delta.changed[0].after.scope).toEqual(["server"]);
   });
 });
+
+describe("keyed directives", () => {
+  it("pairs add_header by header name, not by position", () => {
+    const before = `server {\n  location /api {\n    add_header X-Real-IP "$remote_addr";\n  }\n}`;
+    const after = `server {\n  location /api {\n    add_header X-Frame-Options DENY;\n    add_header X-Real-IP "$remote_addr";\n  }\n}`;
+    const d = diffAst(parse(before), parse(after));
+    expect(d.changed).toEqual([]);
+    expect(d.removed).toEqual([]);
+    expect(d.added).toHaveLength(1);
+    expect(d.added[0].args[0]).toBe("X-Frame-Options");
+  });
+
+  it("still reports a real edit of an existing header", () => {
+    const before = `server {\n  location /api {\n    add_header X-Real-IP "$remote_addr";\n  }\n}`;
+    const after = `server {\n  location /api {\n    add_header X-Real-IP "$http_x_real_ip";\n  }\n}`;
+    const d = diffAst(parse(before), parse(after));
+    expect(d.changed).toHaveLength(1);
+    expect(d.changed[0].after.args.join(" ")).toBe('X-Real-IP "$http_x_real_ip"');
+    expect(d.added).toEqual([]);
+  });
+
+  it("reports a deleted header as removed, not as a change of its neighbour", () => {
+    const before = `server {\n  location /api {\n    add_header A 1;\n    add_header B 2;\n  }\n}`;
+    const after = `server {\n  location /api {\n    add_header B 2;\n  }\n}`;
+    const d = diffAst(parse(before), parse(after));
+    expect(d.changed).toEqual([]);
+    expect(d.removed).toHaveLength(1);
+    expect(d.removed[0].args[0]).toBe("A");
+  });
+
+  it("keeps duplicate header keys distinct by occurrence", () => {
+    const before = `server {\n  location /api {\n    add_header A 1;\n    add_header A 2;\n  }\n}`;
+    const after = `server {\n  location /api {\n    add_header A 1;\n    add_header A 3;\n  }\n}`;
+    const d = diffAst(parse(before), parse(after));
+    expect(d.changed).toHaveLength(1);
+    expect(d.changed[0].before.args.join(" ")).toBe("A 2");
+    expect(d.added).toEqual([]);
+    expect(d.removed).toEqual([]);
+  });
+
+  it("pairs proxy_set_header by header name too", () => {
+    const before = `server {\n  location /api {\n    proxy_set_header Host $host;\n  }\n}`;
+    const after = `server {\n  location /api {\n    proxy_set_header X-Custom 1;\n    proxy_set_header Host $host;\n  }\n}`;
+    const d = diffAst(parse(before), parse(after));
+    expect(d.changed).toEqual([]);
+    expect(d.added).toHaveLength(1);
+    expect(d.added[0].args[0]).toBe("X-Custom");
+  });
+});
