@@ -187,6 +187,7 @@ export async function action({ request }: Route.ActionArgs) {
       streamPorts: data.streamPorts as any,
       webhookUrl: data.webhookUrl || undefined,
       advancedNginx: data.advancedNginx || undefined,
+      customPrelude: data.customPrelude || undefined,
       clientMaxBodySize: data.clientMaxBodySize || undefined,
       draft: null,
       createdAt: new Date(),

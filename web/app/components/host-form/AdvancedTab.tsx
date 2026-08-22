@@ -12,6 +12,8 @@ interface AdvancedTabProps {
   setWebhookUrl: (url: string) => void;
   advancedNginx: string;
   setAdvancedNginx: (nginx: string) => void;
+  customPrelude: string;
+  setCustomPrelude: (prelude: string) => void;
   clientMaxBodySize: string;
   setClientMaxBodySize: (size: string) => void;
   streamPorts: StreamPortFormData[];
@@ -23,6 +25,8 @@ export function AdvancedTab({
   setWebhookUrl,
   advancedNginx,
   setAdvancedNginx,
+  customPrelude,
+  setCustomPrelude,
   clientMaxBodySize,
   setClientMaxBodySize,
   streamPorts,
@@ -312,6 +316,23 @@ export function AdvancedTab({
         />
         <p className="text-xs text-muted-foreground mt-1">
           Optional advanced configuration for custom Nginx directives
+        </p>
+      </div>
+
+      <div>
+        <Label className="mb-1">Custom prelude (before the server block)</Label>
+        <Textarea
+          value={customPrelude}
+          onChange={(e) => setCustomPrelude(e.target.value)}
+          rows={8}
+          placeholder={"map $http_upgrade $connection_upgrade {\n    default upgrade;\n    '' close;\n}"}
+          className="font-mono text-sm"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Raw nginx emitted before this host&apos;s <code>server {"{}"}</code> block, for
+          directives that cannot live inside it (<code>map</code>, <code>upstream</code>,{" "}
+          <code>geo</code>). Filled in automatically when a hand edit to the config file puts
+          unrecognised content there.
         </p>
       </div>
     </div>

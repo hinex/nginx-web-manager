@@ -165,6 +165,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       streamPorts: data.streamPorts as any,
       webhookUrl: data.webhookUrl || undefined,
       advancedNginx: data.advancedNginx || undefined,
+      customPrelude: data.customPrelude || undefined,
       clientMaxBodySize: data.clientMaxBodySize || undefined,
       draft: null,
       updatedAt: new Date(),
@@ -238,6 +239,7 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
     streamPorts: host.streamPorts as any ?? [],
     webhookUrl: host.webhookUrl || "",
     advancedNginx: host.advancedNginx || "",
+    customPrelude: host.customPrelude || "",
     clientMaxBodySize: host.clientMaxBodySize || "",
   };
 

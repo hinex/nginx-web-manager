@@ -67,6 +67,13 @@ export interface HostFormData {
   // Common
   webhookUrl: string;
   advancedNginx: string;
+  /**
+   * Raw nginx emitted *before* the `server {}` block (e.g. `map`, `upstream`,
+   * `geo`). Written by reverse-sync when a hand edit puts unrecognised
+   * content there; carried through the form so a plain Save round-trips it
+   * byte-identically instead of leaving it invisible.
+   */
+  customPrelude: string;
   clientMaxBodySize: string;
   basicAuth: { enabled: boolean; users: Array<{ username: string; password: string }> } | null;
 }
@@ -118,6 +125,7 @@ const defaultFormData: HostFormData = {
 
   webhookUrl: "",
   advancedNginx: "",
+  customPrelude: "",
   clientMaxBodySize: "",
   basicAuth: null,
 };
@@ -610,6 +618,8 @@ export function HostForm({
                   setWebhookUrl={(webhookUrl) => update({ webhookUrl })}
                   advancedNginx={formData.advancedNginx}
                   setAdvancedNginx={(advancedNginx) => update({ advancedNginx })}
+                  customPrelude={formData.customPrelude}
+                  setCustomPrelude={(customPrelude) => update({ customPrelude })}
                   clientMaxBodySize={formData.clientMaxBodySize}
                   setClientMaxBodySize={(clientMaxBodySize) => update({ clientMaxBodySize })}
                   streamPorts={formData.streamPorts}
