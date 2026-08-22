@@ -576,6 +576,149 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
     }
   }
 
+  // ── Upstream bodies → loc.upstreams / loc.balanceMethod ─────────────────
+  //
+  // `upstream host_<id>_loc_<i> {}` is generated from `loc.upstreams[]` and its
+  // name encodes the location index, so a hand edit here IS representable. It
+  // used to fall past every scope gate; §51's sweep made that a refusal rather
+  // than a silent loss, and this makes it actually work.
+  //
+  // Two rules keep this from becoming another §49 (a mapping that looks right
+  // and quietly corrupts):
+  //  1. `protocol` lives on the model but is NEVER rendered in the upstream
+  //     block (it feeds `proxy_pass <protocol>://…`). Reconstructing from text
+  //     alone would erase it, so it is carried across by value-matching the
+  //     pre-edit entry, and inherited from the first upstream for added lines
+  //     — the same rule the form uses when you click "Add Upstream".
+  //  2. Anything in a `server` line beyond `host:port` and `weight=N` has no
+  //     field to land in (`max_fails`, `backup`, …). Rather than parsing what
+  //     we understand and dropping the rest, the whole bucket is left for the
+  //     final sweep to refuse.
+  const upstreamScope = new RegExp(`^upstream host_${host.id}_loc_(\\d+)$`);
+  type UpEntry = { ref: DirectiveRef; kind: "added" | "removed" | "changed"; beforeArgs?: string[] };
+  const byLocation = new Map<number, UpEntry[]>();
+
+  const collectUpstream = (ref: DirectiveRef, kind: UpEntry["kind"], beforeArgs?: string[]) => {
+    if (ref.scope.length !== 1) return;
+    const m = upstreamScope.exec(ref.scope[0]);
+    if (!m) return;
+    const idx = Number(m[1]);
+    if (!byLocation.has(idx)) byLocation.set(idx, []);
+    byLocation.get(idx)!.push({ ref, kind, beforeArgs });
+  };
+  for (const d of delta.added) if (!consumedAdded.has(d)) collectUpstream(d, "added");
+  for (const d of delta.removed) if (!consumedRemoved.has(d)) collectUpstream(d, "removed");
+  for (const c of delta.changed) {
+    if (!consumedChangedAfter.has(c.after)) collectUpstream(c.after, "changed", c.before.args);
+  }
+
+  for (const [idx, entries] of byLocation) {
+    const loc = host.locations[idx];
+    if (!loc) continue; // names a location this host does not have — swept below
+
+    const unknown = entries.some(
+      (e) => e.ref.name !== "server" && !BALANCE_DIRECTIVE_NAMES.has(e.ref.name)
+    );
+    const unrepresentable = entries.some(
+      (e) => e.ref.name === "server" && !isPlainUpstreamServer(e.ref.args)
+    );
+    if (unknown || unrepresentable) continue; // swept below as refusals
+
+    const existing = loc.upstreams ?? [];
+    const fallbackProtocol = existing[0]?.protocol;
+    const upstreams = existing.map((u) => ({ ...u }));
+    const consumedIdx = new Set<number>();
+    const findByValue = (v: StreamUpstream) =>
+      upstreams.findIndex(
+        (u, i) =>
+          !consumedIdx.has(i) && u.server === v.server && u.port === v.port && u.weight === v.weight
+      );
+    const withProtocol = (v: StreamUpstream, protocol: string | undefined) =>
+      protocol === undefined ? { ...v } : { ...v, protocol };
+
+    const serverEntries = entries.filter((e) => e.ref.name === "server");
+    for (const e of serverEntries) {
+      if (e.kind !== "changed" || !e.beforeArgs) continue;
+      const at = findByValue(parseServerLine(e.beforeArgs.join(" ")));
+      const next = parseServerLine(e.ref.args.join(" "));
+      if (at >= 0) {
+        upstreams[at] = withProtocol(next, upstreams[at].protocol);
+        consumedIdx.add(at);
+      } else {
+        upstreams.push(withProtocol(next, fallbackProtocol));
+      }
+    }
+    for (const e of serverEntries) {
+      if (e.kind !== "removed") continue;
+      const at = findByValue(parseServerLine(e.ref.args.join(" ")));
+      if (at >= 0) {
+        upstreams.splice(at, 1);
+        consumedIdx.add(at);
+      }
+    }
+    for (const e of serverEntries) {
+      if (e.kind !== "added") continue;
+      upstreams.push(withProtocol(parseServerLine(e.ref.args.join(" ")), fallbackProtocol));
+    }
+
+    // Same round-trip trap as the stream branch: buildUpstreamBlock emits no
+    // directive for "round_robin" and none for "weighted" either (weight rides
+    // on the server lines), so only explicit evidence may move this field.
+    const balanceAdded = entries.find(
+      (e) => e.kind === "added" && BALANCE_DIRECTIVE_NAMES.has(e.ref.name)
+    );
+    const balanceRemoved = entries.find(
+      (e) => e.kind === "removed" && BALANCE_DIRECTIVE_NAMES.has(e.ref.name)
+    );
+    let balanceMethod = loc.balanceMethod;
+    if (balanceAdded) {
+      balanceMethod = balanceAdded.ref.name;
+    } else if (
+      balanceRemoved ||
+      (serverEntries.length > 0 && !BALANCE_DIRECTIVE_NAMES.has(loc.balanceMethod))
+    ) {
+      balanceMethod = upstreams.some((u) => u.weight > 1) ? "weighted" : "round_robin";
+    }
+
+    // A proxy location with no upstreams is a state `validate.ts:56` refuses to
+    // publish. Writing it here would poison the row: the file edit would appear
+    // to succeed and the host form would then refuse to publish the host, with
+    // nothing pointing back at the deleted line. Refuse at the source instead.
+    if (loc.type === "proxy" && upstreams.length === 0) continue; // swept below
+
+    let produced = false;
+    if (JSON.stringify(upstreams) !== JSON.stringify(existing)) {
+      edits.push({
+        kind: "location-field",
+        index: idx,
+        field: "upstreams",
+        from: existing,
+        to: upstreams,
+        label: `location ${loc.path} upstreams updated`,
+      });
+      produced = true;
+    }
+    if (balanceMethod !== loc.balanceMethod) {
+      edits.push({
+        kind: "location-field",
+        index: idx,
+        field: "balanceMethod",
+        from: loc.balanceMethod,
+        to: balanceMethod,
+        label: `balanceMethod ${loc.balanceMethod} → ${balanceMethod}`,
+      });
+      produced = true;
+    }
+    // Producing nothing means the text changed in a way this reconstruction
+    // cannot see — leave the entries unconsumed so the sweep refuses them.
+    if (!produced) continue;
+    for (const e of entries) {
+      if (e.kind === "added") consumedAdded.add(e.ref);
+      else if (e.kind === "removed") consumedRemoved.add(e.ref);
+      else consumedChangedAfter.add(e.ref);
+    }
+  }
+
   // ── Final sweep: nothing may leave this function unexplained ─────────────
   //
   // Every branch above is gated on a scope shape it recognises (`[]`,
@@ -694,6 +837,21 @@ const BALANCE_DIRECTIVE_NAMES = new Set(["least_conn", "ip_hash", "random"]);
 function upstreamIndexFromScopeKey(hostId: number, key: string): number | null {
   const m = new RegExp(`^upstream stream_host_${hostId}_port_(\\d+)$`).exec(key);
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * True when a `server` line inside an upstream block says nothing the model
+ * cannot hold: an `address:port`, optionally `weight=N`. Anything else
+ * (`max_fails=`, `fail_timeout=`, `backup`, `down`, a stray token) would be
+ * dropped by the reconstruction, so the caller refuses instead of half-reading.
+ */
+function isPlainUpstreamServer(args: string[]): boolean {
+  if (args.length === 0) return false;
+  const [addr, ...rest] = args;
+  const colonIdx = addr.lastIndexOf(":");
+  if (colonIdx <= 0) return false;
+  if (!/^\d+$/.test(addr.slice(colonIdx + 1))) return false;
+  return rest.every((p) => /^weight=\d+$/.test(p));
 }
 
 function parseServerLine(argsStr: string): StreamUpstream {

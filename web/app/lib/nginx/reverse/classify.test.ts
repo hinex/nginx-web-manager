@@ -1361,3 +1361,185 @@ describe("response headers", () => {
     expect(c.edits).toEqual([expect.objectContaining({ kind: "field", field: "hsts", to: false })]);
   });
 });
+
+// ── Upstream bodies (backend addresses) ──────────────────────────────────
+//
+// `upstream host_<id>_loc_<i> { server …; }` is generated from
+// `loc.upstreams[]`, and the block name encodes the location index, so a hand
+// edit here is representable. Before this it fell past every scope gate and was
+// refused by the final sweep (§51): the user was told to use the form rather
+// than losing the edit, but editing a backend address in the file still did not
+// work.
+const UPSTREAM_HOST: HostConfig = {
+  ...baseHost,
+  locations: [
+    {
+      ...baseHost.locations[0],
+      accessListId: null,
+      basicAuth: null,
+      headers: {},
+      upstreams: [
+        { server: "10.0.0.1", port: 8080, weight: 1, protocol: "https" },
+        { server: "10.0.0.2", port: 8080, weight: 1, protocol: "https" },
+      ],
+    },
+  ],
+};
+const upstreamDelta = (before: string, after: string) => diffAst(parse(before), parse(after));
+
+describe("upstream bodies", () => {
+  const rendered = () => buildServerBlock(UPSTREAM_HOST, new Map());
+
+  it("maps an edited backend address to loc.upstreams", () => {
+    const before = rendered();
+    const after = before.replace("server 10.0.0.1:8080;", "server 10.9.9.9:9090;");
+    expect(after).not.toBe(before);
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toEqual([
+      expect.objectContaining({
+        kind: "location-field",
+        index: 0,
+        field: "upstreams",
+        to: [
+          { server: "10.9.9.9", port: 9090, weight: 1, protocol: "https" },
+          { server: "10.0.0.2", port: 8080, weight: 1, protocol: "https" },
+        ],
+      }),
+    ]);
+  });
+
+  it("preserves the protocol, which the upstream block never renders", () => {
+    const before = rendered();
+    const after = before.replace("server 10.0.0.1:8080;", "server 10.9.9.9:9090;");
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    const e = c.edits.find((x) => x.kind === "location-field" && x.field === "upstreams")!;
+    for (const u of (e as { to: Array<{ protocol?: string }> }).to) {
+      expect(u.protocol).toBe("https");
+    }
+  });
+
+  it("appends a hand-added server line, inheriting the protocol", () => {
+    const before = rendered();
+    const after = before.replace(
+      "    server 10.0.0.2:8080;",
+      "    server 10.0.0.2:8080;\n    server 10.0.0.3:8080;"
+    );
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.refusals).toEqual([]);
+    const e = c.edits.find((x) => x.kind === "location-field" && x.field === "upstreams")!;
+    expect((e as { to: unknown[] }).to).toHaveLength(3);
+    expect((e as { to: Array<Record<string, unknown>> }).to[2]).toEqual({
+      server: "10.0.0.3",
+      port: 8080,
+      weight: 1,
+      protocol: "https",
+    });
+  });
+
+  it("drops a removed server line from the model", () => {
+    const before = rendered();
+    const after = before.replace("    server 10.0.0.1:8080;\n", "");
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.refusals).toEqual([]);
+    const e = c.edits.find((x) => x.kind === "location-field" && x.field === "upstreams")!;
+    expect((e as { to: Array<{ server: string }> }).to).toEqual([
+      { server: "10.0.0.2", port: 8080, weight: 1, protocol: "https" },
+    ]);
+  });
+
+  // validate.ts:56 refuses to publish a proxy location with zero upstreams, so
+  // emptying the block from the file must not write that state into the DB —
+  // it would be a row the host form itself then refuses to publish.
+  it("refuses removal of the last upstream rather than writing an unpublishable host", () => {
+    const single: HostConfig = {
+      ...UPSTREAM_HOST,
+      locations: [
+        {
+          ...UPSTREAM_HOST.locations[0],
+          upstreams: [{ server: "10.0.0.1", port: 8080, weight: 1, protocol: "https" }],
+        },
+      ],
+    };
+    const before = buildServerBlock(single, new Map());
+    const after = before.replace("    server 10.0.0.1:8080;\n", "");
+    expect(after).not.toBe(before);
+    const c = classifyDelta(diffAst(parse(before), parse(after)), single);
+    expect(c.edits.filter((e) => e.kind === "location-field")).toEqual([]);
+    expect(c.refusals.length).toBeGreaterThan(0);
+  });
+
+  it("still allows removing one of several upstreams", () => {
+    const before = rendered();
+    const after = before.replace("    server 10.0.0.1:8080;\n", "");
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.refusals).toEqual([]);
+  });
+
+  it("maps an added balance directive to balanceMethod", () => {
+    const before = rendered();
+    const after = before.replace(
+      "upstream host_7_loc_0 {",
+      "upstream host_7_loc_0 {\n    least_conn;"
+    );
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "location-field", index: 0, field: "balanceMethod", to: "least_conn" })
+    );
+  });
+
+  it("refuses an unrepresentable argument instead of absorbing it", () => {
+    const before = rendered();
+    const after = before.replace("server 10.0.0.1:8080;", "server 10.0.0.1:8080 max_fails=3;");
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("server");
+  });
+
+  it("refuses an unrecognised directive inside the upstream block", () => {
+    const before = rendered();
+    const after = before.replace(
+      "upstream host_7_loc_0 {",
+      "upstream host_7_loc_0 {\n    keepalive 32;"
+    );
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("keepalive");
+  });
+
+  it("attributes the edit to the SECOND location when that is where it sits", () => {
+    const host: HostConfig = {
+      ...UPSTREAM_HOST,
+      locations: [
+        UPSTREAM_HOST.locations[0],
+        { ...UPSTREAM_HOST.locations[0], path: "/second", upstreams: [{ server: "10.1.1.1", port: 7000, weight: 1, protocol: "http" }] },
+      ],
+    };
+    const before = buildServerBlock(host, new Map());
+    const after = before.replace("server 10.1.1.1:7000;", "server 10.1.1.2:7000;");
+    expect(after).not.toBe(before);
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toEqual([
+      expect.objectContaining({ kind: "location-field", index: 1, field: "upstreams" }),
+    ]);
+  });
+
+  // A whole added `upstream` block at file scope is legitimately captured as
+  // prelude raw text — that round-trips, so it is not a loss. What must never
+  // happen is it being mismapped onto a real location: `host_7_loc_9` names an
+  // index this host does not have.
+  it("never mismaps an upstream block naming a location that does not exist", () => {
+    const before = rendered();
+    const after = before.replace(
+      "upstream host_7_loc_0 {",
+      "upstream host_7_loc_9 {\n    server 1.2.3.4:80;\n}\n\nupstream host_7_loc_0 {"
+    );
+    const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
+    expect(c.edits.length + c.refusals.length).toBeGreaterThan(0);
+    expect(c.edits.filter((e) => e.kind === "location-field")).toEqual([]);
+  });
+});
