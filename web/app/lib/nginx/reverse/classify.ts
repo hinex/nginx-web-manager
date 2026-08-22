@@ -8,13 +8,18 @@ type Location = HostConfig["locations"][number];
 export type ClassifiedEdit =
   | { kind: "field"; field: string; from: unknown; to: unknown; label: string }
   | { kind: "location-field"; index: number; field: string; from: unknown; to: unknown; label: string }
-  | { kind: "location-advanced"; index: number; text: string; label: string }
+  /**
+   * `replaces` carries the pre-edit text of a *changed* line so `applyEdits`
+   * can rewrite that entry instead of appending beside it. Absent on a plain
+   * addition, which appends. See NUANCES §61.
+   */
+  | { kind: "location-advanced"; index: number; text: string; label: string; replaces?: string }
   // NOTE: `type` is not in the plan's literal interface (design record line ~464)
   // but the core-detection algorithm it describes (proxy/static/redirect/advanced)
   // has nowhere else to land. Added here; see NUANCES.md #15.
   | { kind: "location-added"; path: string; matchType: string; type: string; body: string; label: string }
   | { kind: "location-removed"; index: number; label: string; losing: string[] }
-  | { kind: "server-advanced"; text: string; label: string }
+  | { kind: "server-advanced"; text: string; label: string; replaces?: string }
   | { kind: "prelude"; text: string; label: string }
   // Task 8 (stream): streamPorts[] has no advanced/raw escape hatch in the
   // schema (unlike locations[].advanced / advancedNginx), so the stream
@@ -42,7 +47,27 @@ const REASON_AMBIGUOUS_LOCATIONS = "Two or more locations changed at once and ca
 const REASON_UNMAPPABLE_EDIT =
   "This change could not be mapped back to any host field — revert the line, or make the change in the host form";
 const REASON_PROXY_BOILERPLATE =
-  "proxy_set_header lines are generated from the location's type and cannot be edited here — put custom request headers in Advanced Nginx Directives";
+  "This proxy_set_header line is generated from the location's type and cannot be overridden here — nginx appends a duplicate rather than replacing it";
+/**
+ * Only the header names the location template prints unconditionally are the
+ * template's to own. A hand-added header of any other name is the user's own
+ * line and belongs in `advanced`, not under a refusal — see NUANCES §61.
+ */
+const GENERATED_PROXY_HEADERS = new Set([
+  "host",
+  "x-real-ip",
+  "x-forwarded-for",
+  "x-forwarded-proto",
+  "upgrade",
+  "connection",
+]);
+/**
+ * A changed line that the generator owns and that has neither a model field nor
+ * an existing `advanced` entry to rewrite. Appending it would leave the old
+ * value in the file beside the new one, so refuse instead. See NUANCES §61.
+ */
+const REASON_GENERATED_LINE =
+  "This line is generated from the host's own settings and has no field to edit — change the setting it is generated from";
 const REASON_UNMAPPABLE_REMOVAL =
   "Deleting this line cannot be mapped back to a host field — revert the line, or make the change in the host form";
 
@@ -545,7 +570,8 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
   //        Scope ["server", "location …"] → whitelist / location-advanced.
   for (const c of delta.changed) {
     if (consumedChangedAfter.has(c.after)) continue;
-    if (classifyServerOrLocationEntry(c.after, host, edits, refusals)) consumedChangedAfter.add(c.after);
+    if (classifyServerOrLocationEntry(c.after, host, edits, refusals, c.before))
+      consumedChangedAfter.add(c.after);
   }
   for (const d of delta.added) {
     if (consumedAdded.has(d)) continue;
@@ -784,17 +810,37 @@ function isNoOpEdit(edit: ClassifiedEdit): boolean {
   return JSON.stringify(from ?? null) === JSON.stringify(to ?? null);
 }
 
+/**
+ * Finds `line` among the newline-separated entries of an `advanced` field.
+ *
+ * Both sides are compared trimmed: the stored text is unindented while a
+ * `DirectiveRef.text` is rendered from the file, and neither indentation is
+ * meaningful to nginx.
+ */
+function advancedLineIndex(existing: string | null | undefined, line: string): number {
+  if (!existing) return -1;
+  const want = line.trim();
+  return existing.split("\n").findIndex((l) => l.trim() === want);
+}
+
 function classifyServerOrLocationEntry(
   ref: DirectiveRef,
   host: HostConfig,
   edits: ClassifiedEdit[],
-  refusals: Refusal[]
+  refusals: Refusal[],
+  /**
+   * The pre-edit ref when this is a *changed* line, absent for an addition.
+   * A change must land on top of the line it replaces; an addition may append.
+   */
+  before?: DirectiveRef
 ): boolean {
-  // proxy_set_header is emitted from the location's type/forwardScheme/
-  // preservePath, never from an editable field, so a hand edit here has no
-  // model representation. Refuse loudly with a named remedy instead of
-  // absorbing it into raw text where the next regeneration would drop it.
-  if (ref.name === "proxy_set_header") {
+  // The location template prints a fixed set of proxy_set_header names for
+  // every proxy location, from the location's type/forwardScheme/preservePath.
+  // Those names have no editable field, and nginx *appends* a repeated header
+  // rather than replacing it, so routing one into `advanced` would send both
+  // values to the backend. Refuse only those names — a header the template
+  // never emits is the user's own line and falls through to `advanced` below.
+  if (ref.name === "proxy_set_header" && GENERATED_PROXY_HEADERS.has((ref.args[0] ?? "").toLowerCase())) {
     refusals.push({ line: ref.line, directive: ref.name, reason: REASON_PROXY_BOILERPLATE });
     return true;
   }
@@ -805,7 +851,14 @@ function classifyServerOrLocationEntry(
       if (built.length === 0) return false; // read part of the line — sweep refuses it
       edits.push(...built);
     } else {
-      edits.push({ kind: "server-advanced", text: ref.text, label: `${ref.name} → Advanced` });
+      const replaces = before?.text;
+      if (replaces && advancedLineIndex(host.advancedNginx, replaces) < 0) {
+        // A changed line the generator owns, with no advanced entry to rewrite:
+        // appending would keep the old value in the file beside the new one.
+        refusals.push({ line: ref.line, directive: ref.name, reason: REASON_GENERATED_LINE });
+        return true;
+      }
+      edits.push({ kind: "server-advanced", text: ref.text, label: `${ref.name} → Advanced`, replaces });
     }
     return true;
   }
@@ -821,11 +874,17 @@ function classifyServerOrLocationEntry(
       if (built.length === 0) return false; // read part of the line — sweep refuses it
       edits.push(...built);
     } else {
+      const replaces = before?.text;
+      if (replaces && advancedLineIndex(loc.advanced, replaces) < 0) {
+        refusals.push({ line: ref.line, directive: ref.name, reason: REASON_GENERATED_LINE });
+        return true;
+      }
       edits.push({
         kind: "location-advanced",
         index,
         text: ref.text,
         label: `${ref.name} → Advanced (location ${loc.path})`,
+        replaces,
       });
     }
     return true;

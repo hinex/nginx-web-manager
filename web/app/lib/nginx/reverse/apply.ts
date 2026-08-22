@@ -3,7 +3,27 @@ import type { HostConfig } from "~/lib/nginx/templates/server-block";
 
 type Location = HostConfig["locations"][number];
 
-function appendText(existing: string | null | undefined, text: string): string {
+/**
+ * Merges one advanced line into an `advanced` field.
+ *
+ * With `replaces` the edit is a *changed* line: rewrite that entry in place, so
+ * the old value does not survive alongside the new one. Without it the edit is
+ * an addition and appends. See NUANCES §61.
+ *
+ * The fallback to append when `replaces` is not found keeps this a total
+ * function — the classifier refuses that case before it gets here, but this
+ * reducer must stay safe when handed edits classified against another state.
+ */
+function mergeText(existing: string | null | undefined, text: string, replaces?: string): string {
+  if (replaces) {
+    const want = replaces.trim();
+    const lines = (existing ?? "").split("\n");
+    const at = lines.findIndex((l) => l.trim() === want);
+    if (at >= 0) {
+      lines[at] = text;
+      return lines.join("\n");
+    }
+  }
   return existing ? `${existing}\n${text}` : text;
 }
 
@@ -36,7 +56,7 @@ export function applyEdits(host: HostConfig, edits: ClassifiedEdit[]): HostConfi
       case "location-advanced":
         next.locations[edit.index] = {
           ...next.locations[edit.index],
-          advanced: appendText(next.locations[edit.index].advanced, edit.text),
+          advanced: mergeText(next.locations[edit.index].advanced, edit.text, edit.replaces),
         };
         break;
 
@@ -66,11 +86,14 @@ export function applyEdits(host: HostConfig, edits: ClassifiedEdit[]): HostConfi
         break;
 
       case "prelude":
-        next = { ...next, customPrelude: appendText(next.customPrelude, edit.text) };
+        // No `replaces` on prelude edits: a prelude ref can be a whole block
+        // (an `upstream {...}` body), not a line, so line-wise replacement does
+        // not apply. Still append-only — see NUANCES §61.
+        next = { ...next, customPrelude: mergeText(next.customPrelude, edit.text) };
         break;
 
       case "server-advanced":
-        next = { ...next, advancedNginx: appendText(next.advancedNginx, edit.text) };
+        next = { ...next, advancedNginx: mergeText(next.advancedNginx, edit.text, edit.replaces) };
         break;
     }
   }

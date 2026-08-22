@@ -1147,16 +1147,60 @@ describe("response headers", () => {
     expect(c.edits).toEqual([]);
     expect(c.refusals).toHaveLength(1);
     expect(c.refusals[0].directive).toBe("proxy_set_header");
-    expect(c.refusals[0].reason).toContain("Advanced");
+    // The message used to advise "put custom request headers in Advanced Nginx
+    // Directives". For a name the template owns that advice is false: nginx
+    // appends the repeated header rather than replacing it, so the backend sees
+    // both values (verified against 1.30 — `XFF=[1.2.3.4, 127.0.0.1, 127.0.0.1]`).
+    // The refusal must say why the line cannot be overridden, and must not
+    // point the user at a workaround that silently sends two headers.
+    expect(c.refusals[0].reason).toMatch(/generated|overrid/i);
+    expect(c.refusals[0].reason).not.toContain("Advanced Nginx Directives");
     expect(c.refusals[0].line).toBeGreaterThan(0);
   });
 
-  it("refuses a hand-added proxy_set_header instead of inventing a response header", () => {
+  // A hand-added *request* header must never become a `loc.headers` entry —
+  // that map is response headers, and confusing the two is the §49/§50 bug.
+  // Refusing was one way to guarantee that; raw text is another, and it also
+  // keeps the line. The assertion that matters is unchanged: `headers` is
+  // untouched. What changed is that the user's line now survives.
+  it("routes a hand-added custom request header to advanced, not to the headers map", () => {
     const before = buildServerBlock(HEADER_HOST, new Map());
     const after = before.replace(
       "proxy_http_version 1.1;",
       "proxy_http_version 1.1;\n        proxy_set_header X-Tenant acme;"
     );
+    expect(after).not.toBe(before);
+    const c = classifyDelta(deltaFrom(before, after), HEADER_HOST);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toEqual([
+      expect.objectContaining({
+        kind: "location-advanced",
+        index: 0,
+        text: "proxy_set_header X-Tenant acme;",
+      }),
+    ]);
+
+    const next = applyEdits(HEADER_HOST, c.edits);
+    expect(next.locations[0].headers).toEqual(HEADER_HOST.locations[0].headers);
+    // The line comes back out of the generator — the round trip is the point.
+    expect(buildServerBlock(next, new Map())).toContain("proxy_set_header X-Tenant acme;");
+  });
+
+  // The generator prints Host / X-Real-IP / X-Forwarded-For / X-Forwarded-Proto
+  // / Upgrade / Connection for every proxy location. nginx *appends* repeated
+  // proxy_set_header lines rather than replacing them (verified against 1.30:
+  // a duplicated X-Forwarded-For reached the backend as
+  // `XFF=[1.2.3.4, 127.0.0.1, 127.0.0.1]`), so routing an override into the
+  // additive advanced field would emit both lines and change the request in a
+  // way the user did not write. Only the names the template owns are refused.
+  it.each([
+    ["Host $host", "Host $custom_host"],
+    ["X-Forwarded-For $proxy_add_x_forwarded_for", "X-Forwarded-For $remote_addr"],
+    ['Connection "upgrade"', 'Connection ""'],
+  ])("refuses an override of the generated %s", (from, to) => {
+    const before = buildServerBlock(HEADER_HOST, new Map());
+    const after = before.replace(`proxy_set_header ${from};`, `proxy_set_header ${to};`);
+    expect(after).not.toBe(before);
     const c = classifyDelta(deltaFrom(before, after), HEADER_HOST);
     expect(c.edits).toEqual([]);
     expect(c.refusals).toHaveLength(1);
@@ -1362,5 +1406,108 @@ describe("upstream bodies", () => {
     const c = classifyDelta(upstreamDelta(before, after), UPSTREAM_HOST);
     expect(c.edits.length + c.refusals.length).toBeGreaterThan(0);
     expect(c.edits.filter((e) => e.kind === "location-field")).toEqual([]);
+  });
+});
+
+/**
+ * The advanced fields are additive raw text: `applyEdits` appends to them and
+ * the generator prints them verbatim. That makes them a good home for a line
+ * the model has no field for — but only for a line the model does not already
+ * own, and only when appending is what the user meant.
+ *
+ * A *changed* directive that lands in advanced is the dangerous case: the edit
+ * carries only the new text, so appending keeps the old line too. The user
+ * changes one value, the save reports one edit, and the file comes back with
+ * both values — the old one resurrected. That is not a silent save (§51 is
+ * satisfied, an edit was reported) but it is a wrong one.
+ */
+describe("advanced buckets on a changed line", () => {
+  const advHost: HostConfig = {
+    ...baseHost,
+    advancedNginx: "server_tokens off;",
+    locations: [{ ...baseHost.locations[0], advanced: "proxy_read_timeout 30s;" }],
+  };
+  const roundTrip = (host: HostConfig, from: string, to: string) => {
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, from, to);
+    return { before, after, c: classifyDelta(diffAst(parse(before), parse(after)), host) };
+  };
+
+  it("replaces the old line in a location's advanced text instead of appending", () => {
+    const { after, c } = roundTrip(advHost, "proxy_read_timeout 30s;", "proxy_read_timeout 1h;");
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toEqual([
+      expect.objectContaining({ kind: "location-advanced", index: 0, text: "proxy_read_timeout 1h;" }),
+    ]);
+
+    const next = applyEdits(advHost, c.edits);
+    expect(next.locations[0].advanced).toBe("proxy_read_timeout 1h;");
+    // The regenerated file is what the user typed, byte for byte.
+    expect(buildServerBlock(next, ACCESS_LISTS).trim()).toBe(after.trim());
+  });
+
+  it("replaces the old line in the host's advanced text instead of appending", () => {
+    const { after, c } = roundTrip(advHost, "server_tokens off;", "server_tokens on;");
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toEqual([
+      expect.objectContaining({ kind: "server-advanced", text: "server_tokens on;" }),
+    ]);
+
+    const next = applyEdits(advHost, c.edits);
+    expect(next.advancedNginx).toBe("server_tokens on;");
+    expect(buildServerBlock(next, ACCESS_LISTS).trim()).toBe(after.trim());
+  });
+
+  it("keeps several advanced lines and rewrites only the edited one", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        {
+          ...baseHost.locations[0],
+          advanced: "proxy_read_timeout 30s;\nproxy_send_timeout 30s;\nproxy_buffering off;",
+        },
+      ],
+    };
+    const { after, c } = roundTrip(host, "proxy_send_timeout 30s;", "proxy_send_timeout 90s;");
+    expect(c.refusals).toEqual([]);
+    const next = applyEdits(host, c.edits);
+    expect(next.locations[0].advanced).toBe(
+      "proxy_read_timeout 30s;\nproxy_send_timeout 90s;\nproxy_buffering off;"
+    );
+    expect(buildServerBlock(next, ACCESS_LISTS).trim()).toBe(after.trim());
+  });
+
+  /**
+   * The other half: a changed line that is *not* in advanced is generator-owned
+   * (`proxy_http_version`, the gzip companions, `access_log`). Appending the new
+   * text leaves the generated line in place and emits the directive twice —
+   * which nginx rejects outright for these. There is no field to write and no
+   * text to replace, so a refusal is the only truthful answer.
+   */
+  it("refuses a change to a generator-owned line that has no field and no advanced entry", () => {
+    const { c } = roundTrip(advHost, "proxy_http_version 1.1;", "proxy_http_version 1.0;");
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("proxy_http_version");
+  });
+
+  it("refuses a change to a generated gzip companion at server scope", () => {
+    const host: HostConfig = { ...advHost, compression: true };
+    const { c } = roundTrip(host, "gzip_comp_level 6;", "gzip_comp_level 9;");
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("gzip_comp_level");
+  });
+
+  // An addition still appends — that is what advanced is for.
+  it("still appends a newly added line to existing advanced text", () => {
+    const { c } = roundTrip(
+      advHost,
+      "        proxy_read_timeout 30s;",
+      "        proxy_read_timeout 30s;\n        proxy_buffering off;"
+    );
+    expect(c.refusals).toEqual([]);
+    const next = applyEdits(advHost, c.edits);
+    expect(next.locations[0].advanced).toBe("proxy_read_timeout 30s;\nproxy_buffering off;");
   });
 });
