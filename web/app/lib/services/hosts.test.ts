@@ -122,7 +122,14 @@ vi.mock("~/lib/db/connection", () => {
       return {
         values(v: any) {
           const id = v.id !== undefined ? v.id : _nextId++;
-          const row = defaultRow({ ...v, id });
+          // An undefined value takes the column default; it does not store
+          // undefined. SQLite has no such value to give back — a column is
+          // either its default or NULL — so letting it through here would
+          // hand tests a row shape the database cannot produce.
+          const given = Object.fromEntries(
+            Object.entries(v as Record<string, unknown>).filter(([, val]) => val !== undefined),
+          );
+          const row = defaultRow({ ...given, id });
           _store.set(id, row);
           return {
             returning() {
@@ -137,6 +144,17 @@ vi.mock("~/lib/db/connection", () => {
     update(_table: any) {
       return {
         set(patch: any) {
+          // Drizzle omits undefined keys from the generated UPDATE, so those
+          // columns keep their old value; a spread would copy them and clear
+          // the column instead. An all-undefined patch it refuses outright.
+          // Measured in app/lib/db/update-semantics.test.ts.
+          const effective = Object.fromEntries(
+            Object.entries(patch as Record<string, unknown>).filter(([, v]) => v !== undefined),
+          );
+          if (Object.keys(effective).length === 0) throw new Error("No values to set");
+
+          const apply = (existing: HostRow): HostRow => ({ ...existing, ...effective }) as HostRow;
+
           return {
             where(cond: any) {
               const id = idFrom(cond);
@@ -147,7 +165,7 @@ vi.mock("~/lib/db/connection", () => {
                       if (id === undefined) return undefined;
                       const existing = _store.get(id);
                       if (!existing) return undefined;
-                      const updated = { ...existing, ...patch };
+                      const updated = apply(existing);
                       _store.set(id, updated);
                       return updated;
                     },
@@ -157,7 +175,7 @@ vi.mock("~/lib/db/connection", () => {
                   if (id === undefined) return;
                   const existing = _store.get(id);
                   if (!existing) return;
-                  _store.set(id, { ...existing, ...patch });
+                  _store.set(id, apply(existing));
                 },
               };
             },
@@ -201,6 +219,8 @@ import {
   publishHost,
   deleteHost,
 } from "./hosts";
+import { db } from "~/lib/db/connection";
+import { eq } from "drizzle-orm";
 
 // ─── Auth context helpers ─────────────────────────────────────────────────────
 
@@ -255,6 +275,70 @@ beforeEach(() => {
   _nextId = 1;
   vi.clearAllMocks();
   vi.mocked(validateNginxConfig).mockReturnValue({ valid: true });
+});
+
+// ─── Fidelity of the in-memory db fake ───────────────────────────────────────
+//
+// The fake stands in for drizzle in every test below, so where it disagrees
+// with the driver those tests assert fiction. `{ ...existing, ...patch }` was
+// such a disagreement: object spread copies undefined keys and clears the
+// column, while drizzle omits them and keeps the old value. Pinned against
+// `app/lib/db/update-semantics.test.ts`, which measures the real driver.
+
+describe("in-memory db fake matches drizzle .set()", () => {
+  const seed = () => {
+    (db as any).insert(null).values({ id: 1, advancedNginx: "keep me" }).run();
+    return 1;
+  };
+
+  it("skips an undefined value, keeping the old one", () => {
+    const id = seed();
+    db.update(null as any)
+      .set({ advancedNginx: undefined, clientMaxBodySize: "8m" } as any)
+      .where(eq(null as any, id))
+      .run();
+    expect(_store.get(id)!.advancedNginx).toBe("keep me");
+  });
+
+  it("applies the defined siblings of an undefined key", () => {
+    const id = seed();
+    db.update(null as any)
+      .set({ advancedNginx: undefined, clientMaxBodySize: "8m" } as any)
+      .where(eq(null as any, id))
+      .run();
+    expect(_store.get(id)!.clientMaxBodySize).toBe("8m");
+  });
+
+  it("writes an explicit null", () => {
+    const id = seed();
+    db.update(null as any)
+      .set({ advancedNginx: null, clientMaxBodySize: "8m" } as any)
+      .where(eq(null as any, id))
+      .run();
+    expect(_store.get(id)!.advancedNginx).toBeNull();
+  });
+
+  it("refuses a patch whose every value is undefined", () => {
+    const id = seed();
+    expect(() =>
+      db
+        .update(null as any)
+        .set({ advancedNginx: undefined, webhookUrl: undefined } as any)
+        .where(eq(null as any, id))
+        .run(),
+    ).toThrow(/No values to set/);
+  });
+
+  it("skips undefined on the returning() path too", () => {
+    const id = seed();
+    const returned = db
+      .update(null as any)
+      .set({ advancedNginx: undefined, clientMaxBodySize: "8m" } as any)
+      .where(eq(null as any, id))
+      .returning()
+      .get();
+    expect((returned as any).advancedNginx).toBe("keep me");
+  });
 });
 
 // ─── Scope rejection ─────────────────────────────────────────────────────────
