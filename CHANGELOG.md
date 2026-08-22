@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-23
+
 ### Breaking
 
 - Publishing or writing a managed `host-<id>.conf` / `host-<id>-stream.conf` through
@@ -20,12 +22,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `listen` / `server` / balance directives — all of which previously reported success and
   wrote nothing.
 
+### Added
+
+- **Reverse-sync for hand-edited configs** — a managed `host-<id>.conf` edited by hand (in the
+  config editor, through the REST API or via MCP) is now classified line by line and mapped back
+  into the host model, instead of being silently discarded by the next regeneration. Built on a
+  new AST matcher and a standalone syntax scanner independent of the parser.
+- Every hand edit resolves to one of three honest outcomes: a host-field edit, a preserved raw
+  block, or an explicit refusal naming the line. A changed file never yields silence.
+- Confirmation dialog showing exactly how the pending config edits map into the host model
+  before the save is committed.
+- Config editor highlights model-owned lines and validates nginx syntax live while typing.
+- Reverse-sync for stream (TCP/UDP) host configs, alongside the HTTP ones.
+- Hand-edited `upstream` bodies are mapped back to a location's backend list.
+- Advanced location bodies are editable directly in the host form.
+- Raw directives can be attached to a stream port instead of being refused outright.
+- `custom_prelude` column and raw location escape hatches in the server template, so content
+  that cannot live inside a `server {}` block (`map`, `upstream`, `geo`) survives a round-trip.
+- Managed host drafts are classified before being written via the API and MCP; refusals are
+  reported as `409` with per-line detail.
+- Warning before saving a generated system config file, explaining which scope the write needs.
+
+### Changed
+
+- **nginx 1.29 → 1.30 (stable).** 1.29 was a mainline branch and stopped receiving patches once
+  1.30/1.31 superseded it. The Debian base moves from bookworm to trixie because no bookworm
+  variant is published for 1.30+, which also moves OpenSSL from 3.0 to 3.5.
+- A single nginx directory resolver (`app/lib/paths.ts`) now serves the generator, the config
+  editor, export, import and cluster sync. Previously nine modules resolved it independently and
+  only the generator honoured `DATA_NGINX_DIR`, so a deployment that set only that variable wrote
+  host files into one tree while the editor read another.
+
 ### Fixed
 
 - Custom response headers (`add_header`) on a location are now read back correctly when a config
   is hand-edited; previously the classifier read `proxy_set_header` instead, writing request
   headers into the response-header field and reverting the user's edit on the next save.
 - Inserting a header next to an existing one no longer fabricates a second, unrelated edit.
+- Clearing an optional host field (custom prelude, advanced nginx, webhook URL, SSL paths, client
+  max body size) now actually clears it. The emptied value was dropped from the `UPDATE`, so the
+  column kept its old contents and the next regeneration re-emitted the deleted text while the
+  save reported success.
+- Anonymous sibling `server` blocks that share a scope key are no longer collapsed onto one
+  another, which previously made an edit to any but the last one vanish.
+- A gzip fragment spread over several directives is recognised as one compression flag change
+  rather than a set of unmappable lines.
+- Advanced locations render their body in the host form instead of blank rows, and the custom
+  prelude is surfaced so it round-trips.
+- Deletions that cannot be mapped back to the model are refused instead of silently reverted.
+- Publishing a managed host config reverse-syncs it into the host model rather than leaving the
+  model and the file disagreeing.
+- Saving a non-host config file no longer demands the `hosts:publish` scope.
+- An unmanaged config file is modelled with `hostId` `null` instead of `-1`.
+- Cluster-receive contains writes to the nginx directory, rolls back invalid batches and refuses
+  out-of-tree paths with `400`.
+- The config editor reports validation reverts and reload failures honestly; `writeConfigLive`
+  reverts an invalid config instead of leaving it on disk, and a failed delete is rolled back.
+- The syntax scanner names the outermost unclosed `{` and the block that opened it, instead of
+  pointing at a character deep inside the file.
 
 ## [1.1.1] - 2026-07-13
 
@@ -100,6 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[2.0.0]: https://github.com/hardskilled/nginx-manager/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/hardskilled/nginx-manager/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/hardskilled/nginx-manager/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/hardskilled/nginx-manager/compare/v1.0.0...v1.0.1
