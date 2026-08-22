@@ -34,9 +34,9 @@ import { applyEdits, applyStreamEdits } from "~/lib/nginx/reverse/apply";
 
 const DRAFT_SUFFIX = ".draft";
 
-export function nginxDir(): string {
-  return resolve(process.env.NGINX_DIR || "/data/nginx");
-}
+import { nginxDir } from "~/lib/paths";
+// Re-exported so existing importers of this module keep working.
+export { nginxDir };
 
 function auditDetails(auth: AuthContext, extra: Record<string, unknown>) {
   return auth.via === "token" ? { ...extra, tokenId: auth.tokenId, via: "token" } : extra;

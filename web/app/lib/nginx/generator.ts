@@ -13,23 +13,19 @@ import { join } from "path";
 import { buildServerBlock, type HostConfig } from "./templates/server-block";
 import { buildStreamBlock } from "./templates/stream";
 import { buildHtpasswdContent, type AccessListWithRules } from "./templates/access";
+import { hostConfDir, streamConfDir, authDir } from "~/lib/paths";
 
 /** nginx's own config root (nginx.conf, mime.types) — a *different* directory. */
 export const NGINX_CONF_DIR = process.env.NGINX_CONF_DIR || "/etc/nginx";
 
 /**
- * Root of the managed config tree that this app owns and regenerates.
- *
- * `NGINX_DIR` is the supported name. `DATA_NGINX_DIR` is a deprecated alias,
- * honoured only when `NGINX_DIR` is unset — the editor and the API read
- * `NGINX_DIR` in eight places, so a config that set only `DATA_NGINX_DIR`
- * used to point the generator and the editor at different directories, and
- * every edit made in the editor was lost on the next regeneration.
+ * Directory layout comes from `~/lib/paths` — the one module that resolves
+ * `NGINX_DIR` / the deprecated `DATA_NGINX_DIR` alias. Kept as named exports
+ * here because the rest of the codebase imports them from the generator.
  */
-const DATA_NGINX_DIR = process.env.NGINX_DIR || process.env.DATA_NGINX_DIR || "/data/nginx";
-export const HOST_CONF_DIR = join(DATA_NGINX_DIR, "conf.d");
-export const STREAM_CONF_DIR = join(DATA_NGINX_DIR, "stream.d");
-export const AUTH_DIR = join(DATA_NGINX_DIR, "auth");
+export const HOST_CONF_DIR = hostConfDir();
+export const STREAM_CONF_DIR = streamConfDir();
+export const AUTH_DIR = authDir();
 
 /**
  * Generate all nginx configuration files from the database.
