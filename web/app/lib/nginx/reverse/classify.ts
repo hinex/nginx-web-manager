@@ -752,6 +752,28 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
   return { edits, refusals };
 }
 
+/**
+ * True when an edit changes nothing. A delta entry only reaches the whitelist
+ * because the *text* moved, so a no-op edit is not an edit — it is proof the
+ * handler read the part of the line it understood and dropped the rest. Every
+ * single-argument handler has this shape: `ssl_certificate /c.pem backup.pem;`
+ * reads `args[0]`, produces `/c.pem → /c.pem`, and the extra token vanishes.
+ *
+ * Accepting it reported a successful save, wrote a row identical to the old
+ * one, and let the `generateAllConfigs()` on that same save restore the
+ * original line — the user reloaded and found their edit gone, with no refusal
+ * and no error anywhere. That is the §49 signature, and it survives any
+ * per-directive arity rule that a future table entry forgets to add.
+ *
+ * Dropping the edit leaves the ref unconsumed so the final sweep refuses it,
+ * which is the honest answer: this line says something the model cannot hold.
+ */
+function isNoOpEdit(edit: ClassifiedEdit): boolean {
+  if (!("from" in edit) || !("to" in edit)) return false;
+  const { from, to } = edit as { from: unknown; to: unknown };
+  return JSON.stringify(from ?? null) === JSON.stringify(to ?? null);
+}
+
 function classifyServerOrLocationEntry(
   ref: DirectiveRef,
   host: HostConfig,
@@ -769,7 +791,9 @@ function classifyServerOrLocationEntry(
   if (ref.scope.length === 1 && ref.scope[0] === "server" && ref.name !== "location") {
     const entry = SERVER_FIELDS[ref.name];
     if (entry) {
-      edits.push(entry.build(ref, host));
+      const built = [entry.build(ref, host)].filter((e) => !isNoOpEdit(e));
+      if (built.length === 0) return false; // read part of the line — sweep refuses it
+      edits.push(...built);
     } else {
       edits.push({ kind: "server-advanced", text: ref.text, label: `${ref.name} → Advanced` });
     }
@@ -783,7 +807,9 @@ function classifyServerOrLocationEntry(
     const loc = host.locations[index];
     const entry = LOCATION_FIELDS[ref.name];
     if (entry) {
-      edits.push(...entry.build(ref, loc, index));
+      const built = entry.build(ref, loc, index).filter((e) => !isNoOpEdit(e));
+      if (built.length === 0) return false; // read part of the line — sweep refuses it
+      edits.push(...built);
     } else {
       edits.push({
         kind: "location-advanced",

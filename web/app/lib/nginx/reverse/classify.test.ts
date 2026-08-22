@@ -294,6 +294,33 @@ describe("classifyDelta", () => {
     expect(c.edits).toContainEqual(expect.objectContaining({ kind: "field", field: "sslCertPath" }));
   });
 
+  // Both of these used to classify as `X → X`: the handler read `args[0]`, the
+  // trailing token vanished, the save reported success, and the very next
+  // `generateAllConfigs()` restored the original line. Found by the
+  // apply→regenerate round-trip in `invariant.test.ts`; see §57.
+  it("refuses a trailing token after ssl_certificate instead of dropping it", () => {
+    const host: HostConfig = { ...baseHost, sslType: "custom", sslCertPath: "/c.pem", sslKeyPath: "/k.pem" };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, "ssl_certificate /c.pem;", "ssl_certificate /c.pem backup.pem;");
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
+    expect(c.refusals.length).toBeGreaterThan(0);
+    expect(c.edits).toEqual([]);
+  });
+
+  it("refuses a trailing token after alias instead of dropping it", () => {
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [{ ...baseHost.locations[0], type: "static", staticDir: "/srv/files" }],
+    };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, "alias /srv/files;", "alias /srv/files zzz;");
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
+    expect(c.refusals.length).toBeGreaterThan(0);
+    expect(c.edits).toEqual([]);
+  });
+
   it("refuses an edited resolver directive", () => {
     const host: HostConfig = { ...baseHost, dnsResolver: "8.8.8.8", dnsResolverValid: "30s" };
     const before = buildServerBlock(host, ACCESS_LISTS);

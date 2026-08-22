@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parse } from "~/lib/nginx/parser";
 import { diffAst } from "./match";
 import { classifyDelta, classifyStreamDelta, type StreamHostConfig } from "./classify";
+import { applyEdits, applyStreamEdits } from "./apply";
 import { buildServerBlock, type HostConfig } from "~/lib/nginx/templates/server-block";
 import { buildStreamBlock } from "~/lib/nginx/templates/stream";
 
@@ -191,5 +192,80 @@ describe("save is never silent: stream", () => {
     expect(next[idx]).not.toBe(line);
     const c = classifyStreamDelta(diffAst(parse(rendered), parse(next.join("\n"))), streamHost);
     expect(c.edits.length + c.refusals.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The second invariant: an edit the classifier *accepted* must survive the very
+ * next regeneration.
+ *
+ * §49's signature was not an empty delta. The edit classified, applied cleanly,
+ * wrote the row, and was then wiped by the `generateAllConfigs()` that runs on
+ * the same save — the user saw "saved", reloaded the page, and found their line
+ * exactly as it was before. The harness above proves only that the classifier
+ * *spoke*; it says nothing about whether what it said lands. Every mapping
+ * added since (§51 upstream bodies included) is a fresh chance to reintroduce
+ * that shape, because a `location-field` edit writing a value the generator
+ * does not read from is indistinguishable from a correct one at classify time.
+ *
+ * Refusals are skipped deliberately: any refusal makes `applyConfigEdit` throw,
+ * so no row is written and there is nothing to revert.
+ *
+ * A failure here means: accepted, applied, silently reverted. Fix the mapping
+ * or turn the case into a refusal — never relax the assertion.
+ */
+describe.each(MATRIX)("an accepted edit survives regeneration: %s", (_name, host) => {
+  const rendered = buildServerBlock(host, new Map());
+  const lines = rendered.split("\n");
+  const targets = targetsOf(rendered);
+
+  /** Re-renders the host the save would have stored, or null if nothing was stored. */
+  function roundTrip(editedText: string): string | null {
+    const c = classifyDelta(diffAst(parse(rendered), parse(editedText)), host);
+    if (c.refusals.length > 0) return null; // save blocked — nothing written
+    if (c.edits.length === 0) return null; // silence — the harness above owns this
+    return buildServerBlock(applyEdits(host, c.edits), new Map());
+  }
+
+  it.each(targets)("deleting `%s` is not reverted", (_line, idx) => {
+    const after = roundTrip(lines.filter((_, i) => i !== idx).join("\n"));
+    if (after === null) return;
+    expect(after).not.toBe(rendered);
+  });
+
+  it.each(targets)("mutating `%s` is not reverted", (line, idx) => {
+    const next = [...lines];
+    next[idx] = line.replace(/;\s*$/, " zzz_probe;");
+    const after = roundTrip(next.join("\n"));
+    if (after === null) return;
+    expect(after).not.toBe(rendered);
+  });
+});
+
+describe("an accepted edit survives regeneration: stream", () => {
+  const rendered = buildStreamBlock(streamHost.id, streamHost.streamPorts as never, null, null);
+  const lines = rendered.split("\n");
+  const targets = targetsOf(rendered);
+
+  function roundTrip(editedText: string): string | null {
+    const c = classifyStreamDelta(diffAst(parse(rendered), parse(editedText)), streamHost);
+    if (c.refusals.length > 0) return null;
+    if (c.edits.length === 0) return null;
+    const next = applyStreamEdits(streamHost, c.edits);
+    return buildStreamBlock(next.id, next.streamPorts as never, null, null);
+  }
+
+  it.each(targets)("deleting `%s` is not reverted", (_line, idx) => {
+    const after = roundTrip(lines.filter((_, i) => i !== idx).join("\n"));
+    if (after === null) return;
+    expect(after).not.toBe(rendered);
+  });
+
+  it.each(targets)("mutating `%s` is not reverted", (line, idx) => {
+    const next = [...lines];
+    next[idx] = line.replace(/;\s*$/, " zzz_probe;");
+    const after = roundTrip(next.join("\n"));
+    if (after === null) return;
+    expect(after).not.toBe(rendered);
   });
 });
