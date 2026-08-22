@@ -150,6 +150,18 @@ function upstreamRenameRefusal(delta: AstDelta): { refusal: Refusal; removed: Di
 
 // ── Flag directives (removal ⇒ field goes false) ──
 
+/**
+ * Directives buildServerBlock emits alongside `gzip on;` whenever
+ * host.compression is true (server-block.ts, "// Compression").
+ *
+ * Turning the flag off in the UI deletes all five lines at once, so a user
+ * deleting the same fragment by hand must be read as one flag change. Before
+ * this set existed, `gzip on` mapped to the flag but its four companions each
+ * hit REASON_UNMAPPABLE_REMOVAL — and a single refusal rejects the whole
+ * edit, so removing the compression block by hand was impossible.
+ */
+const GZIP_COMPANIONS = new Set(["gzip_vary", "gzip_proxied", "gzip_comp_level", "gzip_types"]);
+
 function flagRemovalEdit(ref: DirectiveRef): ClassifiedEdit | null {
   if (ref.name === "add_header" && ref.args[0] === "Strict-Transport-Security") {
     return { kind: "field", field: "hsts", from: true, to: false, label: "Strict-Transport-Security header removed → HSTS off" };
@@ -515,6 +527,12 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
     if (consumedAdded.has(d)) continue;
     classifyServerOrLocationEntry(d, host, edits);
   }
+  // Only absorb the gzip companions when `gzip on` itself is going away in the
+  // same delta; deleting a companion on its own stays a refusal, otherwise the
+  // user's intent to drop that one line would vanish without a trace.
+  const compressionRemoved = delta.removed.some(
+    (d) => d.name === "gzip" && d.args.includes("on") && d.scope.length === 1 && d.scope[0] === "server"
+  );
   for (const d of delta.removed) {
     if (consumedRemoved.has(d)) continue;
     if (d.scope.length === 1 && d.scope[0] === "server") {
@@ -522,6 +540,9 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
       const flagEdit = flagRemovalEdit(d);
       if (flagEdit) {
         edits.push(flagEdit);
+      } else if (compressionRemoved && GZIP_COMPANIONS.has(d.name)) {
+        // Same fragment as the `gzip on` removal above — already represented
+        // by that single compression edit.
       } else {
         // Any other unmatched removal at server scope has no raw-text
         // representation to remove from (advancedNginx is additive text) —

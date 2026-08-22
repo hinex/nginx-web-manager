@@ -4,6 +4,7 @@ import { diffAst, type AstDelta } from "./match";
 import { classifyDelta, classifyStreamDelta, type ClassifiedEdit, type StreamHostConfig } from "./classify";
 import type { HostConfig } from "~/lib/nginx/templates/server-block";
 import { buildStreamBlock } from "~/lib/nginx/templates/stream";
+import { buildServerBlock } from "~/lib/nginx/templates/server-block";
 
 const baseHost: HostConfig = {
   id: 7,
@@ -1114,5 +1115,86 @@ server {
       const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
       expect(c.edits.length + c.refusals.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// ─── Flag removals against real parser output ───────────
+//
+// These cases exist to stop trusting `classify.ts`'s substring matching on
+// `if` arguments (`includes("www")` / `includes("scheme")`). Every fixture is
+// built from a REAL host row → buildServerBlock → text → delete the rendered
+// fragment → parse both sides → diffAst → classifyDelta. Nothing here is a
+// hand-built DirectiveRef, so a mismatch between what the tokenizer emits and
+// what the heuristic looks for shows up as a failure instead of passing on a
+// delta that could never occur in production.
+
+const sslBase: HostConfig = {
+  ...baseHost,
+  sslType: "custom",
+  sslCertPath: "/c.pem",
+  sslKeyPath: "/k.pem",
+};
+
+/**
+ * Delete exactly the text the template emits for `field`.
+ *
+ * The template pushes each flag's lines contiguously, so the ON rendering is
+ * the OFF rendering with one contiguous run inserted. Stripping the common
+ * leading and trailing lines isolates precisely that run. (A line-multiset
+ * difference is NOT equivalent and is actively wrong here: the closing `}` of
+ * an `if` block also occurs in the OFF text as a location's `}`, so it would
+ * be spared and left orphaned, corrupting the brace structure and turning the
+ * test into a parser-confusion test instead of a heuristics test.)
+ */
+function removeRenderedFragmentFor(host: HostConfig, field: keyof HostConfig) {
+  const original = buildServerBlock(host, new Map());
+  const on = original.split("\n");
+  const off = buildServerBlock({ ...host, [field]: false }, new Map()).split("\n");
+
+  let head = 0;
+  while (head < off.length && on[head] === off[head]) head++;
+  let tail = 0;
+  while (
+    tail < off.length - head &&
+    on[on.length - 1 - tail] === off[off.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  const edited = [...on.slice(0, head), ...on.slice(on.length - tail)].join("\n");
+  return { original, edited, fragment: on.slice(head, on.length - tail).join("\n") };
+}
+
+describe("flag removals against real parser output", () => {
+  it.each([
+    ["hsts", { ...sslBase, hsts: true }],
+    ["http2", { ...sslBase, http2: true }],
+    ["compression", { ...sslBase, compression: true }],
+    ["redirectWww", { ...sslBase, domains: ["www.example.com", "example.com"], redirectWww: true }],
+    ["sslForceHttps", { ...sslBase, sslForceHttps: true }],
+  ] as Array<[string, HostConfig]>)(
+    "removing the %s output yields a single field edit and zero refusals",
+    (field, host) => {
+      const { original, edited } = removeRenderedFragmentFor(host, field as keyof HostConfig);
+      expect(edited).not.toBe(original); // the flag really renders something
+
+      const c = classifyDelta(diffAst(parse(original), parse(edited)), host);
+      expect(c.refusals).toEqual([]);
+      expect(c.edits).toContainEqual(
+        expect.objectContaining({ kind: "field", field, from: true, to: false })
+      );
+    }
+  );
+  it("still refuses a lone gzip_vary removal, with gzip on left in place", () => {
+    const host = { ...sslBase, compression: true };
+    const original = buildServerBlock(host, new Map());
+    const edited = original
+      .split("\n")
+      .filter((l) => !l.includes("gzip_vary"))
+      .join("\n");
+    expect(edited).not.toBe(original);
+
+    const c = classifyDelta(diffAst(parse(original), parse(edited)), host);
+    expect(c.refusals).toContainEqual(expect.objectContaining({ directive: "gzip_vary" }));
+    expect(c.edits).toEqual([]);
   });
 });
