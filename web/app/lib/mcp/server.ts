@@ -1,6 +1,12 @@
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
-import { ForbiddenError, HostValidationError, InvalidPathError, NotFoundError } from "~/lib/services/errors";
+import {
+  ForbiddenError,
+  HostValidationError,
+  InvalidPathError,
+  NotFoundError,
+  ConfigClassificationError,
+} from "~/lib/services/errors";
 import * as configsService from "~/lib/services/configs";
 import * as nginxService from "~/lib/services/nginx";
 import * as statsService from "~/lib/services/stats";
@@ -296,6 +302,15 @@ export async function handleToolCall(
     if (err instanceof HostValidationError) {
       const note = err.kind === "nginx" ? " State was rolled back." : "";
       return errorResult(`${err.message}${note}`);
+    }
+    if (err instanceof ConfigClassificationError) {
+      // One line per refusal, each carrying its file line number: an agent
+      // has to be able to locate and fix the offending line. Collapsing this
+      // into the bare message would hide exactly the actionable part.
+      const lines = err.refusals.map((r) => `  line ${r.line}: ${r.reason}`);
+      return errorResult(
+        `${err.message}. Nothing was written.\n${lines.join("\n")}`
+      );
     }
     return errorResult(`Error: ${(err as Error).message}`);
   }

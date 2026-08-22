@@ -24,7 +24,11 @@ vi.mock("~/lib/services/hosts", () => ({
 
 import * as configsService from "~/lib/services/configs";
 import * as hostsService from "~/lib/services/hosts";
-import { ForbiddenError, HostValidationError } from "~/lib/services/errors";
+import {
+  ForbiddenError,
+  HostValidationError,
+  ConfigClassificationError,
+} from "~/lib/services/errors";
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
 import {
@@ -135,6 +139,24 @@ describe("handleToolCall", () => {
     expect(r.isError).toBeUndefined();
     expect(r.content[0].text).toContain("Draft saved");
     expect(r.content[0].text).toContain("publish_config");
+  });
+
+  it("renders classification refusals as one line each, not an opaque error", async () => {
+    vi.mocked(configsService.writeConfigDraft).mockImplementation(() => {
+      throw new ConfigClassificationError([
+        { line: 12, directive: "resolver", reason: "resolver and set $backend_* come from global settings, not from this host" },
+        { line: 30, directive: "gzip_vary", reason: "Deleting this line cannot be mapped back to a host field" },
+      ]);
+    });
+    const r = await handleToolCall(ctx(["configs:write"]), "write_config", {
+      path: "a.conf",
+      content: "...",
+    });
+    expect(r.isError).toBe(true);
+    const text = r.content[0].text;
+    expect(text).toContain("Nothing was written");
+    expect(text).toContain("line 12: resolver and set $backend_* come from global settings");
+    expect(text).toContain("line 30: Deleting this line cannot be mapped back to a host field");
   });
 
   it("delegates publish_config", async () => {

@@ -44,7 +44,13 @@ import { authenticate } from "~/lib/auth/authenticate";
 import * as configsService from "~/lib/services/configs";
 import * as nginxService from "~/lib/services/nginx";
 import * as statsService from "~/lib/services/stats";
-import { ForbiddenError, NotFoundError, InvalidPathError, HostValidationError } from "~/lib/services/errors";
+import {
+  ForbiddenError,
+  NotFoundError,
+  InvalidPathError,
+  HostValidationError,
+  ConfigClassificationError,
+} from "~/lib/services/errors";
 import type { AuthContext } from "~/lib/auth/authenticate";
 import type { Scope } from "~/lib/auth/scopes";
 
@@ -266,6 +272,29 @@ describe("PUT /api/v1/configs/file", () => {
     const res = await configFileAction({ request: req, params: {} });
     expect(res.status).toBe(400);
     assertJson(res);
+  });
+
+  it("maps a classification refusal to 409 with line-numbered refusals", async () => {
+    vi.mocked(configsService.writeConfigDraft).mockImplementation(() => {
+      throw new ConfigClassificationError([
+        { line: 12, directive: "resolver", reason: "resolver and set $backend_* come from global settings, not from this host" },
+      ]);
+    });
+    const req = makeRequest(
+      "PUT",
+      "http://localhost/api/v1/configs/file?path=/data/nginx/a.conf",
+      { content: "..." }
+    );
+    const res = await configFileAction({ request: req, params: {} });
+    // 409, not 400: the submitted text conflicts with the host model. It is
+    // not malformed, and clients need to tell the two apart.
+    expect(res.status).toBe(409);
+    assertJson(res);
+    const body = await res.json();
+    expect(body.code).toBe("config_classification_error");
+    expect(body.refusals).toEqual([
+      expect.objectContaining({ line: 12, reason: expect.stringContaining("global settings") }),
+    ]);
   });
 
   it("InvalidPathError → 400", async () => {

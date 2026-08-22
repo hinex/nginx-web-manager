@@ -5,6 +5,7 @@ import {
   InvalidPathError,
   HostValidationError,
   InputValidationError,
+  ConfigClassificationError,
 } from "~/lib/services/errors";
 
 /** Snake-case the error class name: e.g. "ForbiddenError" → "forbidden_error" */
@@ -17,7 +18,7 @@ function toCode(name: string): string {
 /**
  * Map a thrown error to a JSON Response.
  * ForbiddenError → 403, NotFoundError → 404, InvalidPathError → 400,
- * HostValidationError → 422, unknown → 500.
+ * HostValidationError → 422, ConfigClassificationError → 409, unknown → 500.
  */
 export function toResponse(err: unknown): Response {
   if (err instanceof ForbiddenError) {
@@ -48,6 +49,19 @@ export function toResponse(err: unknown): Response {
     return Response.json(
       { error: err.message, code: toCode(err.name) },
       { status: 422 }
+    );
+  }
+  if (err instanceof ConfigClassificationError) {
+    // 409 Conflict: the submitted text conflicts with the host model. Not a
+    // 400 — the request is well-formed, and clients must tell the two apart
+    // to know whether retrying with the same body could ever succeed.
+    return Response.json(
+      {
+        error: err.message,
+        code: toCode(err.name),
+        refusals: err.refusals.map((r) => ({ line: r.line, directive: r.directive, reason: r.reason })),
+      },
+      { status: 409 }
     );
   }
   console.error("[api/v1] unhandled error:", err);
