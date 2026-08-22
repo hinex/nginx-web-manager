@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 // Mock DB modules
 vi.mock("~/lib/db/connection", () => ({ db: {} }));
@@ -924,5 +924,51 @@ describe("buildServerBlock basicAuth", () => {
     const result = buildServerBlock(host, new Map());
     expect(result).not.toContain("auth_basic");
     expect(result).not.toContain("auth_basic_user_file");
+  });
+});
+
+// ─── Nginx directory env resolution ─────────────────────
+
+describe("nginx directory env var", () => {
+  const saved = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...saved };
+    vi.resetModules();
+  });
+
+  it("prefers NGINX_DIR over the legacy DATA_NGINX_DIR", async () => {
+    process.env.NGINX_DIR = "/tmp/n1";
+    process.env.DATA_NGINX_DIR = "/tmp/legacy";
+    vi.resetModules();
+    const mod = await import("./generator");
+    expect(mod.HOST_CONF_DIR).toBe("/tmp/n1/conf.d");
+    expect(mod.STREAM_CONF_DIR).toBe("/tmp/n1/stream.d");
+    expect(mod.AUTH_DIR).toBe("/tmp/n1/auth");
+  });
+
+  it("falls back to DATA_NGINX_DIR when NGINX_DIR is unset", async () => {
+    delete process.env.NGINX_DIR;
+    process.env.DATA_NGINX_DIR = "/tmp/legacy";
+    vi.resetModules();
+    const mod = await import("./generator");
+    expect(mod.HOST_CONF_DIR).toBe("/tmp/legacy/conf.d");
+  });
+
+  it("defaults to /data/nginx when neither is set", async () => {
+    delete process.env.NGINX_DIR;
+    delete process.env.DATA_NGINX_DIR;
+    vi.resetModules();
+    const mod = await import("./generator");
+    expect(mod.HOST_CONF_DIR).toBe("/data/nginx/conf.d");
+  });
+
+  it("keeps NGINX_CONF_DIR (/etc/nginx) a separate directory", async () => {
+    process.env.NGINX_DIR = "/tmp/n1";
+    delete process.env.NGINX_CONF_DIR;
+    vi.resetModules();
+    const mod = await import("./generator");
+    expect(mod.HOST_CONF_DIR).toBe("/tmp/n1/conf.d");
+    expect(mod.NGINX_CONF_DIR).toBe("/etc/nginx");
   });
 });
