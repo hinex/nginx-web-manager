@@ -270,6 +270,21 @@ export function AdvancedTab({
                     </div>
                   )}
                 </div>
+
+                <div>
+                  <Label className="text-xs mb-1">Raw directives for this port</Label>
+                  <Textarea
+                    value={sp.advanced ?? ""}
+                    onChange={(e) => updateStreamPort(spIndex, { advanced: e.target.value })}
+                    rows={4}
+                    className="font-mono text-xs"
+                    placeholder="proxy_timeout 30s;"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Inserted verbatim into this port's <code>server</code> block and validated by{" "}
+                    <code>nginx -t</code> on save.
+                  </p>
+                </div>
               </div>
             ))}
           </div>

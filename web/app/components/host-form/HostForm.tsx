@@ -46,6 +46,13 @@ export interface StreamPortFormData {
   protocol: "tcp" | "udp";
   upstreams: Array<{ server: string; port: number; weight: number }>;
   balanceMethod: string;
+  /**
+   * Raw directives for this port's `server {}` block. Optional so the same
+   * object still satisfies the narrowed drizzle column type (§41) when absent.
+   * Without a field here the model would keep a value the UI hides — the shape
+   * §47/§48 were about.
+   */
+  advanced?: string | null;
 }
 
 export interface HostFormData {

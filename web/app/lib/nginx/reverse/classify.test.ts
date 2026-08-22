@@ -1116,6 +1116,73 @@ server {
       expect(c.edits.length + c.refusals.length).toBeGreaterThan(0);
     }
   });
+  describe("stream port advanced bucket", () => {
+    it("routes an unrecognised server-scope directive to the port's advanced bucket", () => {
+      const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+      const actual = expectedText.replace(
+        "    proxy_pass stream_host_7_port_0;",
+        "    proxy_pass stream_host_7_port_0;\n    proxy_timeout 30s;"
+      );
+      const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+      expect(c.refusals).toEqual([]);
+      expect(c.edits).toContainEqual(
+        expect.objectContaining({ kind: "stream-field", index: 0, field: "advanced" })
+      );
+      const e = c.edits.find((x) => x.kind === "stream-field" && x.field === "advanced")!;
+      expect((e as { to: string }).to).toContain("proxy_timeout 30s;");
+    });
+
+    it("attributes the bucket to the SECOND port when that is where the line sits", () => {
+      const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+      const actual = expectedText.replace(
+        "    proxy_pass stream_host_7_port_1;",
+        "    proxy_pass stream_host_7_port_1;\n    proxy_timeout 45s;"
+      );
+      const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+      expect(c.refusals).toEqual([]);
+      expect(c.edits).toContainEqual(
+        expect.objectContaining({ kind: "stream-field", index: 1, field: "advanced" })
+      );
+    });
+
+    it("still refuses a whole added server block", () => {
+      const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+      const actual = expectedText + "\n\nserver {\n    listen 7777;\n    proxy_pass somewhere;\n}";
+      const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+      expect(c.refusals.length).toBeGreaterThan(0);
+    });
+
+    it("still refuses an added listen line that pairs with no port", () => {
+      const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+      const actual = expectedText.replace(
+        "    listen 9000;",
+        "    listen 9000;\n    listen 9001;"
+      );
+      const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+      expect(c.refusals.length).toBeGreaterThan(0);
+    });
+
+    it("still refuses an unrecognised directive inside the upstream block", () => {
+      const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+      const actual = expectedText.replace(
+        "    server 10.0.0.1:9000;",
+        "    server 10.0.0.1:9000;\n    keepalive 32;"
+      );
+      const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+      expect(c.refusals.length).toBeGreaterThan(0);
+    });
+
+    it("renders the bucket back into the port's server block", () => {
+      const text = buildStreamBlock(
+        7,
+        [{ ...twoPortHost.streamPorts[0], advanced: "proxy_timeout 30s;" }],
+        null,
+        null
+      );
+      expect(text).toContain("proxy_timeout 30s;");
+    });
+  });
+
 });
 
 // ─── Flag removals against real parser output ───────────

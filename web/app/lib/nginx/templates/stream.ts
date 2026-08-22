@@ -10,6 +10,16 @@ export function buildStreamBlock(
     protocol: string;
     upstreams: Array<{ server: string; port: number; weight: number }>;
     balanceMethod: string;
+    /**
+     * Raw directives for this port's `server {}` block — the stream twin of a
+     * location's `advanced` body. Without it, a legitimate directive nginx
+     * supports here (`proxy_timeout`, `proxy_protocol`, …) could be refused
+     * forever with no way to apply it. Deliberately scoped to the port's own
+     * `server` block: adding or removing a whole `server`/`upstream`, or
+     * editing `listen`, stays a refusal, so the structural guarantees this
+     * subsystem exists for are untouched.
+     */
+    advanced?: string | null;
   }>,
   dnsResolver?: string | null,
   dnsResolverValid?: string | null
@@ -53,6 +63,14 @@ export function buildStreamBlock(
       lines.push(`    proxy_pass $backend_${upstreamName};`);
     } else {
       lines.push(`    proxy_pass ${upstreamName};`);
+    }
+
+    // Raw escape hatch, emitted last so it can override the generated
+    // directives above (same ordering rule as a location's advanced body).
+    if (sp.advanced) {
+      for (const line of sp.advanced.split("\n")) {
+        lines.push(`    ${line}`);
+      }
     }
     lines.push("}");
 

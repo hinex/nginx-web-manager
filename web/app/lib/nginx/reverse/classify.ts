@@ -677,6 +677,8 @@ export interface StreamHostConfig {
     protocol: "tcp" | "udp";
     upstreams: Array<{ server: string; port: number; weight: number }>;
     balanceMethod: string;
+    /** Raw directives for this port's `server {}` block — see templates/stream.ts. */
+    advanced?: string | null;
   }>;
 }
 
@@ -719,6 +721,10 @@ function findStreamPortIndex(host: StreamHostConfig, port: number, protocol: "tc
 type StreamEntry = {
   /** Set once this entry has produced an edit or a refusal; see the final sweep. */
   explained?: boolean;
+  /** The single scope segment this ref sat in, e.g. "server" or "server#1". */
+  scopeKey?: string;
+  /** Rendered source text, used verbatim when the line lands in the advanced bucket. */
+  text?: string;
   kind: "added" | "removed" | "changed";
   name: string;
   line: number;
@@ -808,6 +814,24 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
   /** The bare "server" plus the "#N" occurrence suffixes from match.ts indexBlocks(). */
   const ANON_SERVER_SCOPE = /^server(#\d+)?$/;
 
+  /**
+   * Recover the port index from the anonymous-server occurrence suffix.
+   *
+   * `listen` edits above are attributed by *value* precisely because that
+   * survives reordering. A raw directive has no value to match on, so this
+   * falls back to position: buildStreamBlock emits exactly one `server {}` per
+   * port, in order, and match.ts numbers siblings in the same order — so
+   * occurrence N is streamPorts[N]. If a user reorders the blocks by hand the
+   * text lands on the wrong port, which is why the caller also bounds-checks
+   * against the model and refuses anything it cannot place.
+   */
+  function portIndexFromServerScope(key: string | undefined): number | null {
+    if (!key) return null;
+    const m = /^server(?:#(\d+))?$/.exec(key);
+    if (!m) return null;
+    return m[1] ? Number(m[1]) : 0;
+  }
+
   const byUpstreamIndex = new Map<number, StreamEntry[]>();
   const serverScopeEntries: StreamEntry[] = [];
 
@@ -815,7 +839,15 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
   const allEntries: StreamEntry[] = [];
 
   function bucket(ref: DirectiveRef, kind: StreamEntry["kind"], beforeArgs?: string[]) {
-    const entry: StreamEntry = { kind, name: ref.name, line: ref.line, args: ref.args, beforeArgs };
+    const entry: StreamEntry = {
+      kind,
+      name: ref.name,
+      line: ref.line,
+      args: ref.args,
+      beforeArgs,
+      scopeKey: ref.scope.length === 1 ? ref.scope[0] : undefined,
+      text: ref.text,
+    };
     allEntries.push(entry);
     if (ref.scope.length !== 1) return; // nested deeper than a top-level block — swept below
     const idx = upstreamIndexFromScopeKey(host.id, ref.scope[0]);
@@ -945,7 +977,32 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
   const listenByIdx = new Map<number, StreamEntry[]>();
   const editedListenIdx = new Set<number>();
   for (const e of serverScopeEntries) {
-    if (e.name !== "listen") {
+    if (e.name !== "listen" && e.name !== "proxy_pass") {
+      // Not a directive the model owns — but unlike `listen`/`proxy_pass`, an
+      // arbitrary directive in this port's own `server {}` has somewhere to go.
+      // An added line lands in the port's raw bucket; a *changed* or *removed*
+      // one would mean rewriting text this classifier never rendered, so those
+      // keep the refusal.
+      const idx = e.kind === "added" ? portIndexFromServerScope(e.scopeKey) : null;
+      if (idx !== null && idx < host.streamPorts.length && e.text) {
+        const port = host.streamPorts[idx];
+        const advanced = [port.advanced, e.text].filter(Boolean).join("\n");
+        edits.push({
+          kind: "stream-field",
+          index: idx,
+          field: "advanced",
+          from: port.advanced ?? null,
+          to: advanced,
+          label: `${e.name} → Advanced (stream port ${port.port})`,
+        });
+        e.explained = true;
+        continue;
+      }
+      refusals.push({ line: e.line, directive: e.name, reason: REASON_STREAM_UNMAPPABLE });
+      e.explained = true;
+      continue;
+    }
+    if (e.name === "proxy_pass") {
       refusals.push({ line: e.line, directive: e.name, reason: REASON_STREAM_UNMAPPABLE });
       e.explained = true;
       continue;
