@@ -258,14 +258,14 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                       <Label className="text-xs mb-1">Raw location body</Label>
                       <Textarea
                         value={location.advanced ?? ""}
-                        readOnly
+                        onChange={(e) => updateLocation(locIndex, { advanced: e.target.value })}
                         rows={8}
                         className="font-mono text-sm"
                       />
                       <p className="text-xs text-muted-foreground mt-1">
-                        This block was written by hand and cannot be expressed by the typed
-                        fields. Edit it through the config editor; saving the form here keeps it
-                        byte-identical.
+                        This block cannot be expressed by the typed fields. It is editable raw
+                        nginx, inserted verbatim into this location's block and validated by{" "}
+                        <code>nginx -t</code> on save.
                       </p>
                     </div>
                   )}

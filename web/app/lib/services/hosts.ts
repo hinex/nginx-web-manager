@@ -103,8 +103,8 @@ function liveFields(row: HostRow): Record<string, unknown> {
   };
 }
 
-/** Restore a full snapshot row verbatim (used after a failed publish/delete). */
-function restoreSnapshot(snapshot: HostRow): void {
+/** Restore a full snapshot row verbatim (used after a failed publish/delete/save). */
+export function restoreSnapshot(snapshot: HostRow): void {
   db.update(hosts)
     .set({
       domains: snapshot.domains,

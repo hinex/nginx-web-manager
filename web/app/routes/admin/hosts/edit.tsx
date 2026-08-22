@@ -12,6 +12,7 @@ import { reloadNginx } from "~/lib/nginx/reload";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { hashBasicAuthPasswords } from "~/lib/auth/hash-basic-auth";
 import { validatePublishData } from "~/lib/hosts/validate";
+import { restoreSnapshot } from "~/lib/services/hosts";
 
 export function meta() {
   return [{ title: "Edit Host — Nginx Manager" }];
@@ -147,6 +148,13 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   // Publish flow — update main fields, clear draft
+  // Snapshot before mutating: a failed `nginx -t` below used to return an error
+  // to the form while leaving the new row committed and the generated files on
+  // disk — the config editor's advanced bodies are now editable here, so a
+  // syntactically invalid one would have been a pre-existing way to half-apply
+  // a broken host. Mirrors publishHost's snapshot/restore (hosts.ts:107, :326).
+  const snapshot = db.select().from(hosts).where(eq(hosts.id, id)).get();
+
   db.update(hosts)
     .set({
       domains: data.domains,
@@ -199,6 +207,13 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   const validation = validateNginxConfig();
   if (!validation.valid) {
+    // Roll the host back and regenerate, so the live config on disk matches the
+    // row again and the user is looking at the error for a change that was NOT
+    // applied — rather than at a broken host that saved anyway.
+    if (snapshot) {
+      restoreSnapshot(snapshot as never);
+      generateAllConfigs();
+    }
     return { error: `Nginx config validation failed: ${validation.error}` };
   }
 
