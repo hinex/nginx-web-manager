@@ -4,7 +4,10 @@ set -euo pipefail
 # Usage: ./update_version.sh <version>
 # Example: ./update_version.sh 0.1.0
 #
-# Updates the version in package.json, commits, and creates a git tag.
+# Writes the version into web/package.json and prints the commands to run next.
+# It does NOT commit and does NOT tag: a release also needs a CHANGELOG entry, and the
+# tag has to point at a commit that carries both. It refuses if the tag already exists,
+# so it cannot be used to repair a version after the fact — do that by hand.
 
 if [ $# -ne 1 ]; then
   echo "Usage: $0 <version>"

@@ -7,9 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-23
+
+1.2.0 was tagged but never published: its release run executed the test suite on Node instead
+of Bun and stopped before the image was built. There is no `1.2.0` image; this release carries
+everything listed under 1.2.0 below.
+
+### Fixed
+
+- Release CI runs the test suite on Bun. `bun run test` started the `vitest` binary through its
+  `#!/usr/bin/env node` shebang, so the suite ran on the runner's Node, where the app's
+  `bun:sqlite` driver cannot resolve. Two test files failed to load rather than to fail, and
+  their tests were dropped from the reported count instead of being counted as failures.
+- The suite now asserts its own runtime, so running it on Node names the runtime and the fix
+  instead of emitting module-resolution errors that point at an unrelated file.
+- `actions/checkout` moved from v4 (Node 20, deprecated by the runner) to v7.
+
 ## [1.2.0] - 2026-08-23
 
-### Breaking
+### Changed — incompatible with 1.1.x
+
+These two changes alter responses that existing integrations may depend on. Review any client
+that publishes managed host configs before upgrading.
 
 - Publishing or writing a managed `host-<id>.conf` / `host-<id>-stream.conf` through
   `PUT /api/v1/configs/file`, `publish_config` or `write_config` now requires the
@@ -154,6 +173,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.2.1]: https://github.com/hardskilled/nginx-manager/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/hardskilled/nginx-manager/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/hardskilled/nginx-manager/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/hardskilled/nginx-manager/compare/v1.0.1...v1.1.0
