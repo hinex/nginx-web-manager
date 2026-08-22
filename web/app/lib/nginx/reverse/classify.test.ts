@@ -1198,3 +1198,99 @@ describe("flag removals against real parser output", () => {
     expect(c.edits).toEqual([]);
   });
 });
+
+// The fixtures above diff against the hand-written BASE_SERVER constant, which
+// contains `proxy_set_header X-Real-IP $remote_addr;` and no `add_header` at
+// all — even though baseHost.headers is non-empty. That fixture was written to
+// match the classifier rather than the generator, and that divergence is
+// exactly why the header direction bug survived the suite (NUANCES §49).
+// These cases diff against real generator output instead.
+const HEADER_HOST: HostConfig = {
+  ...baseHost,
+  locations: [{ ...baseHost.locations[0], accessListId: null, basicAuth: null }],
+};
+const deltaFrom = (before: string, after: string) => diffAst(parse(before), parse(after));
+
+describe("response headers", () => {
+  it("maps an edited add_header to the location's headers map", () => {
+    const before = buildServerBlock(HEADER_HOST, new Map());
+    const after = before.replace(
+      'add_header X-Real-IP "$remote_addr";',
+      'add_header X-Real-IP "$http_x_real_ip";'
+    );
+    expect(after).not.toBe(before);
+    const c = classifyDelta(deltaFrom(before, after), HEADER_HOST);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toEqual([
+      expect.objectContaining({
+        kind: "location-field",
+        index: 0,
+        field: "headers",
+        to: { "X-Real-IP": "$http_x_real_ip" },
+      }),
+    ]);
+  });
+
+  it("maps a hand-added add_header into headers, with no fabricated second edit", () => {
+    const before = buildServerBlock(HEADER_HOST, new Map());
+    const after = before.replace(
+      'add_header X-Real-IP "$remote_addr";',
+      'add_header X-Real-IP "$remote_addr";\n        add_header X-Frame-Options "DENY";'
+    );
+    const c = classifyDelta(deltaFrom(before, after), HEADER_HOST);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toHaveLength(1);
+    expect(c.edits[0]).toEqual(
+      expect.objectContaining({
+        field: "headers",
+        to: { "X-Real-IP": "$remote_addr", "X-Frame-Options": "DENY" },
+      })
+    );
+  });
+
+  it("refuses an edit to the generated proxy_set_header boilerplate", () => {
+    const before = buildServerBlock(HEADER_HOST, new Map());
+    const after = before.replace(
+      "proxy_set_header Host $host;",
+      "proxy_set_header Host $custom_host;"
+    );
+    expect(after).not.toBe(before);
+    const c = classifyDelta(deltaFrom(before, after), HEADER_HOST);
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("proxy_set_header");
+    expect(c.refusals[0].reason).toContain("Advanced");
+    expect(c.refusals[0].line).toBeGreaterThan(0);
+  });
+
+  it("refuses a hand-added proxy_set_header instead of inventing a response header", () => {
+    const before = buildServerBlock(HEADER_HOST, new Map());
+    const after = before.replace(
+      "proxy_http_version 1.1;",
+      "proxy_http_version 1.1;\n        proxy_set_header X-Tenant acme;"
+    );
+    const c = classifyDelta(deltaFrom(before, after), HEADER_HOST);
+    expect(c.edits).toEqual([]);
+    expect(c.refusals).toHaveLength(1);
+    expect(c.refusals[0].directive).toBe("proxy_set_header");
+  });
+
+  it("still routes Strict-Transport-Security to the hsts flag, not to headers", () => {
+    const host: HostConfig = {
+      ...HEADER_HOST,
+      hsts: true,
+      sslType: "custom",
+      sslCertPath: "/c.pem",
+      sslKeyPath: "/k.pem",
+    };
+    const before = buildServerBlock(host, new Map());
+    const after = before
+      .split("\n")
+      .filter((l) => !l.includes("Strict-Transport-Security"))
+      .join("\n");
+    expect(after).not.toBe(before);
+    const c = classifyDelta(deltaFrom(before, after), host);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toEqual([expect.objectContaining({ kind: "field", field: "hsts", to: false })]);
+  });
+});

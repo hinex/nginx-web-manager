@@ -39,6 +39,8 @@ const REASON_LISTEN_443 = "Turn SSL off in the host's SSL tab instead of deletin
 const REASON_UPSTREAM_RENAME = "This upstream name is an internal link identifier and cannot be renamed";
 const REASON_SECOND_SERVER = "A second server block cannot be represented in the host model";
 const REASON_AMBIGUOUS_LOCATIONS = "Two or more locations changed at once and cannot be matched to model entries";
+const REASON_PROXY_BOILERPLATE =
+  "proxy_set_header lines are generated from the location's type and cannot be edited here — put custom request headers in Advanced Nginx Directives";
 const REASON_UNMAPPABLE_REMOVAL =
   "Deleting this line cannot be mapped back to a host field — revert the line, or make the change in the host form";
 
@@ -365,11 +367,21 @@ export const LOCATION_FIELDS: Record<string, LocationFieldEntry> = {
       ];
     },
   },
-  proxy_set_header: {
+  // The generator renders `loc.headers` as `add_header K "V";`
+  // (server-block.ts:346), so `add_header` — not `proxy_set_header` — is the
+  // directive that represents this field. Reading the other one wrote request
+  // headers into a response-header field and reverted the user's actual edit
+  // on the next regeneration (NUANCES §49).
+  add_header: {
     field: "headers",
     build: (ref, loc, index) => {
       const [key, ...rest] = ref.args;
-      const value = rest.join(" ");
+      // HSTS is owned by the `hsts` flag (see flagRemovalEdit above). Letting it
+      // also reach `headers` would give one rendered line two sources of truth.
+      if (key === "Strict-Transport-Security") return [];
+      // The template writes the value quoted and stores it bare, so a round-trip
+      // that skipped this would grow a pair of quotes on every save.
+      const value = rest.join(" ").replace(/^"(.*)"$/s, "$1");
       const newHeaders = { ...loc.headers, [key]: value };
       return [
         {
@@ -378,7 +390,7 @@ export const LOCATION_FIELDS: Record<string, LocationFieldEntry> = {
           field: "headers",
           from: loc.headers,
           to: newHeaders,
-          label: `proxy_set_header ${key} → ${value}`,
+          label: `add_header ${key} → ${value}`,
         },
       ];
     },
@@ -521,11 +533,11 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
   //        Scope ["server", "location …"] → whitelist / location-advanced.
   for (const c of delta.changed) {
     if (consumedChangedAfter.has(c.after)) continue;
-    classifyServerOrLocationEntry(c.after, host, edits);
+    classifyServerOrLocationEntry(c.after, host, edits, refusals);
   }
   for (const d of delta.added) {
     if (consumedAdded.has(d)) continue;
-    classifyServerOrLocationEntry(d, host, edits);
+    classifyServerOrLocationEntry(d, host, edits, refusals);
   }
   // Only absorb the gzip companions when `gzip on` itself is going away in the
   // same delta; deleting a companion on its own stays a refusal, otherwise the
@@ -565,7 +577,20 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
   return { edits, refusals };
 }
 
-function classifyServerOrLocationEntry(ref: DirectiveRef, host: HostConfig, edits: ClassifiedEdit[]): void {
+function classifyServerOrLocationEntry(
+  ref: DirectiveRef,
+  host: HostConfig,
+  edits: ClassifiedEdit[],
+  refusals: Refusal[]
+): void {
+  // proxy_set_header is emitted from the location's type/forwardScheme/
+  // preservePath, never from an editable field, so a hand edit here has no
+  // model representation. Refuse loudly with a named remedy instead of
+  // absorbing it into raw text where the next regeneration would drop it.
+  if (ref.name === "proxy_set_header") {
+    refusals.push({ line: ref.line, directive: ref.name, reason: REASON_PROXY_BOILERPLATE });
+    return;
+  }
   if (ref.scope.length === 1 && ref.scope[0] === "server" && ref.name !== "location") {
     const entry = SERVER_FIELDS[ref.name];
     if (entry) {
