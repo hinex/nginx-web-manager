@@ -1,11 +1,11 @@
 import type { Route } from "./+types/configs";
 import { requireEditor } from "~/lib/auth/middleware";
 import { listConfigFiles } from "~/lib/nginx/parser";
+import { nginxDir } from "~/lib/paths";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireEditor(request);
-  const files = listConfigFiles(NGINX_DIR);
+  const files = listConfigFiles(nginxDir());
   return Response.json({ files });
 }

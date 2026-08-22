@@ -4,8 +4,8 @@ import { listConfigFiles } from "~/lib/nginx/parser";
 import { readFileSync } from "fs";
 import { eq } from "drizzle-orm";
 import { decrypt } from "~/lib/crypto/encrypt";
+import { nginxDir } from "~/lib/paths";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 /**
  * Cluster API keys are stored encrypted at rest (AES-256-GCM). Rows created
@@ -50,7 +50,7 @@ export async function syncToNode(nodeId: number): Promise<SyncResult> {
       .run();
 
     // Collect all config files, filtering out local-only tagged files
-    const files = listConfigFiles(NGINX_DIR);
+    const files = listConfigFiles(nginxDir());
 
     // Build a set of local-only file paths from sync tags
     const localOnlyTags = db

@@ -16,8 +16,8 @@ import {
 } from "~/lib/db/schema";
 import { createTar } from "~/lib/backup/tar";
 import { encryptBackup } from "~/lib/backup/crypto";
+import { nginxDir } from "~/lib/paths";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAdmin(request);
@@ -26,11 +26,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const password = url.searchParams.get("password") || "";
 
   // Collect all nginx config files with relative paths
-  const configFiles = listConfigFiles(NGINX_DIR);
+  const configFiles = listConfigFiles(nginxDir());
   const configs: Record<string, string> = {};
   for (const file of configFiles) {
     try {
-      const relPath = relative(NGINX_DIR, file);
+      const relPath = relative(nginxDir(), file);
       configs[relPath] = readFileSync(file, "utf-8");
     } catch {
       // Skip unreadable files

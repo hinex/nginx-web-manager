@@ -55,3 +55,16 @@ describe("nginx directory resolution", () => {
     expect(nginxDir()).toBe("/data/nginx");
   });
 });
+
+describe("containment of the resolver", () => {
+  it("is the only module that reads the nginx directory from the environment", async () => {
+    const { Glob } = await import("bun");
+    const offenders: string[] = [];
+    for await (const f of new Glob("app/**/*.{ts,tsx}").scan(".")) {
+      if (f === "app/lib/paths.ts" || f.endsWith(".test.ts") || f.endsWith(".test.tsx")) continue;
+      const src = await Bun.file(f).text();
+      if (/process\.env\.(NGINX_DIR|DATA_NGINX_DIR)/.test(src)) offenders.push(f);
+    }
+    expect(offenders).toEqual([]);
+  });
+});

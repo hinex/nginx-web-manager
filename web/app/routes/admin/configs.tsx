@@ -31,8 +31,8 @@ import { ApplyDialog } from "~/components/config-editor/ApplyDialog";
 // documented for the parser barrel in the model-highlight work.
 import { isGeneratedSystemFile, type ConfigEditPreview } from "~/lib/services/configs";
 import type { Refusal } from "~/lib/nginx/reverse/classify";
+import { nginxDir } from "~/lib/paths";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export function meta() {
   return [{ title: "Config Editor — Nginx Manager" }];
@@ -40,12 +40,12 @@ export function meta() {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireEditor(request);
-  const files = listConfigFiles(NGINX_DIR);
+  const files = listConfigFiles(nginxDir());
   // Computed here (server-only) rather than in the component, so the check
   // — and everything `~/lib/services/configs` pulls in to make it — never
   // reaches the client bundle. See the import comment above.
   const generatedFiles = files.filter((f) => isGeneratedSystemFile(f));
-  return { files, baseDir: NGINX_DIR, generatedFiles };
+  return { files, baseDir: nginxDir(), generatedFiles };
 }
 
 // ── Types ────────────────────────────────────────────────

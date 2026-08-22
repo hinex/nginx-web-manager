@@ -21,8 +21,8 @@ import {
   customTemplates,
 } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { nginxDir } from "~/lib/paths";
 
-const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 /**
  * Prepare a backup row for insertion: JSON serialization turns Date columns
@@ -82,7 +82,7 @@ export async function action({ request }: Route.ActionArgs) {
   // Resolved paths are validated to stay inside NGINX_DIR so a malicious
   // archive entry (e.g. "../../etc/passwd" or an absolute path) cannot
   // escape the nginx config directory (zip-slip).
-  const nginxRoot = resolve(NGINX_DIR);
+  const nginxRoot = nginxDir();
   for (const [relPath, content] of Object.entries(backup.configs)) {
     try {
       const fullPath = resolve(nginxRoot, relPath);

@@ -10,13 +10,14 @@ import type { AuthContext } from "~/lib/auth/authenticate";
 import { ROLE_CEILINGS, type Role } from "~/lib/auth/scopes";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 import { resolve } from "path";
+import { nginxDir } from "~/lib/paths";
 
-const NGINX_DIR = resolve(process.env.NGINX_DIR || "/data/nginx");
 
 function isAllowedPath(filePath: unknown): filePath is string {
   if (typeof filePath !== "string" || !filePath) return false;
   const p = resolve(filePath);
-  return (p === NGINX_DIR || p.startsWith(NGINX_DIR + "/")) && p.endsWith(".conf");
+  const root = nginxDir();
+  return (p === root || p.startsWith(root + "/")) && p.endsWith(".conf");
 }
 
 export async function action({ request }: Route.ActionArgs) {

@@ -54,12 +54,12 @@ import {
   Lock,
 } from "lucide-react";
 import { PageHeader } from "~/components/PageHeader";
+import { nginxDir } from "~/lib/paths";
 
 export function meta() {
   return [{ title: "Cluster — Nginx Manager" }];
 }
 
-const NGINX_DIR = process.env.NGINX_DIR || "/data/nginx";
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireAdmin(request);
@@ -68,7 +68,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Load config files and their sync tags
   let configFiles: string[] = [];
   try {
-    configFiles = listConfigFiles(NGINX_DIR);
+    configFiles = listConfigFiles(nginxDir());
   } catch {
     // Nginx dir may not be accessible
   }
