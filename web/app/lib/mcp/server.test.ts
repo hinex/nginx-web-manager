@@ -177,6 +177,20 @@ describe("handleToolCall", () => {
     expect(text).toContain("line 30: Deleting this line cannot be mapped back to a host field");
   });
 
+  it("reports the reverse-synced model changes after publishing a managed host draft", async () => {
+    vi.mocked(configsService.publishConfig).mockReturnValue({
+      published: true,
+      valid: true,
+      applied: [
+        { kind: "field", field: "clientMaxBodySize", from: "5m", to: "50m", label: "client_max_body_size 5m → 50m" },
+      ],
+    });
+    const r = await handleToolCall(ctx(["configs:publish"]), "publish_config", { path: "conf.d/host-1.conf" });
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain("Reverse-synced 1 change(s)");
+    expect(r.content[0].text).toContain("client_max_body_size 5m → 50m");
+  });
+
   it("delegates publish_config", async () => {
     const r = await handleToolCall(ctx(["configs:publish"]), "publish_config", { path: "a.conf" });
     expect(configsService.publishConfig).toHaveBeenCalled();

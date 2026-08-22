@@ -71,7 +71,7 @@ export const tools: McpTool[] = [
     name: "publish_config",
     requiredScope: "configs:publish",
     description:
-      "Publish a previously written draft to the live config: snapshot the old version, validate with nginx -t, reload nginx. Rolls back automatically if validation fails.",
+      "Publish a previously written draft to the live config: snapshot the old version, validate with nginx -t, reload nginx. Rolls back automatically if validation fails. Publishing a managed host-<id>.conf also writes the edits back into the host model (so a later regeneration keeps them) and additionally requires hosts:publish.",
     inputSchema: {
       type: "object",
       properties: { path: { type: "string", description: "Target .conf path (draft must exist)" } },
@@ -257,11 +257,20 @@ export async function handleToolCall(
       }
       case "publish_config": {
         const r = configsService.publishConfig(auth, args.path);
-        return textResult(
-          r.published
-            ? `Config published and nginx reloaded: ${args.path}`
-            : `Publish aborted, live config rolled back. nginx -t: ${r.error}. Draft kept.`
-        );
+        if (!r.published) {
+          return textResult(
+            `Publish aborted, live config rolled back. nginx -t: ${r.error}. Draft kept.`
+          );
+        }
+        const lines = [`Config published and nginx reloaded: ${args.path}`];
+        if (r.applied && r.applied.length > 0) {
+          // Managed host file: the model moved too, so say what moved.
+          lines.push(
+            `Reverse-synced ${r.applied.length} change(s) into the host model:`,
+            ...r.applied.map((e) => `  ${e.label}`)
+          );
+        }
+        return textResult(lines.join("\n"));
       }
       case "delete_config": {
         configsService.deleteConfig(auth, args.path);

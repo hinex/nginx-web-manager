@@ -706,6 +706,58 @@ describe("previewConfigEdit / applyConfigEdit", () => {
     expect(r.hostId).toBeNull();
     expect(writeFileSync).toHaveBeenCalled();
   });
+
+  // ── publishConfig reverse-syncs managed host files ──
+  //
+  // publishConfig used to copy host-<id>.conf.draft onto the live file and
+  // reload, never touching the host model — so the next generateAllConfigs()
+  // (triggered by any unrelated create/toggle/delete) silently overwrote the
+  // just-published edit. Delegating to applyConfigEdit reuses the whole
+  // transaction: classify, refuse, write live with nginx -t rollback, update
+  // the DB, audit, reload.
+
+  it("updates the host model when publishing a managed hand draft", () => {
+    const row = makeHostRow({ clientMaxBodySize: "5m" });
+    hostsStore.set(1, row);
+    const actual = baselineText(row).replace("client_max_body_size 5m;", "client_max_body_size 50m;");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(actual as never);
+
+    const r = publishConfig(auth, "conf.d/host-1.conf");
+    expect(r.published).toBe(true);
+    expect(hostsStore.get(1).clientMaxBodySize).toBe("50m"); // the model moved
+  });
+
+  it("rolls back and refuses when the draft no longer maps to the model", () => {
+    const row = makeHostRow();
+    hostsStore.set(1, row);
+    const actual = baselineText(row).replace("server {", "server {\n    resolver 8.8.8.8;");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(actual as never);
+
+    expect(() => publishConfig(auth, "conf.d/host-1.conf")).toThrow(ConfigClassificationError);
+    expect(hostsStore.get(1)).toEqual(row); // model untouched
+    expect(unlinkSync).not.toHaveBeenCalled(); // draft still there
+    expect(reloadNginx).not.toHaveBeenCalled(); // nginx never reloaded
+  });
+
+  it("leaves an unmanaged conf.d draft on the plain publish path", () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue("server { listen 80; }" as never);
+    const r = publishConfig(auth, "conf.d/site.conf");
+    expect(r.published).toBe(true);
+    expect(r.applied).toBeUndefined();
+    expect(hostsStore.size).toBe(0); // no model write at all
+  });
+
+  it("demands hosts:publish as well for a managed host file", () => {
+    hostsStore.set(1, makeHostRow());
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(baselineText(makeHostRow()) as never);
+    const weak = ctx(["configs:read", "configs:write", "configs:publish"]);
+    expect(() => publishConfig(weak, "conf.d/host-1.conf")).toThrow(ForbiddenError);
+  });
+
 });
 
 describe("previewConfigEdit / applyConfigEdit — stream host files (host-<id>-stream.conf)", () => {

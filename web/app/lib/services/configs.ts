@@ -264,6 +264,11 @@ export interface PublishResult {
   published: boolean;
   valid: boolean;
   error?: string;
+  /**
+   * Model changes reverse-synced onto the host by this publish. Present only
+   * for managed `host-<id>.conf` / `host-<id>-stream.conf` files.
+   */
+  applied?: ClassifiedEdit[];
 }
 
 export function publishConfig(auth: AuthContext, filePath: string): PublishResult {
@@ -273,6 +278,26 @@ export function publishConfig(auth: AuthContext, filePath: string): PublishResul
   if (!existsSync(draftPath)) throw new NotFoundError(`No draft for ${filePath}`);
 
   const draftContent = readFileSync(draftPath, "utf-8");
+
+  // A managed host file must reverse-sync into the host model, not just land
+  // on disk. Copying the draft over the live file and reloading leaves the
+  // model stale, and the next generateAllConfigs() — triggered by any
+  // unrelated host create/toggle/delete — regenerates from that stale model
+  // and silently destroys the published edit.
+  //
+  // applyConfigEdit already performs the entire transaction (classify,
+  // refuse, live write with nginx -t rollback, DB update, audit, reload), so
+  // delegate rather than reimplementing it here; in particular do not
+  // double-reload. Note the scope change this implies: publishing a *managed*
+  // host file now needs `hosts:publish` on top of `configs:publish`, which
+  // applyConfigEdit enforces itself. Unmanaged files keep needing only
+  // `configs:publish` and stay on the plain path below.
+  if (classifyFor(filePath, draftContent) !== null) {
+    const r = applyConfigEdit(auth, filePath, draftContent);
+    unlinkSync(draftPath);
+    return { published: true, valid: true, applied: r.applied };
+  }
+
   const original = existsSync(livePath) ? readFileSync(livePath, "utf-8") : null;
   if (original !== null) {
     saveVersion({
