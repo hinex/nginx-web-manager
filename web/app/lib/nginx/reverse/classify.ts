@@ -39,6 +39,8 @@ const REASON_LISTEN_443 = "Turn SSL off in the host's SSL tab instead of deletin
 const REASON_UPSTREAM_RENAME = "This upstream name is an internal link identifier and cannot be renamed";
 const REASON_SECOND_SERVER = "A second server block cannot be represented in the host model";
 const REASON_AMBIGUOUS_LOCATIONS = "Two or more locations changed at once and cannot be matched to model entries";
+const REASON_UNMAPPABLE_EDIT =
+  "This change could not be mapped back to any host field — revert the line, or make the change in the host form";
 const REASON_PROXY_BOILERPLATE =
   "proxy_set_header lines are generated from the location's type and cannot be edited here — put custom request headers in Advanced Nginx Directives";
 const REASON_UNMAPPABLE_REMOVAL =
@@ -533,11 +535,11 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
   //        Scope ["server", "location …"] → whitelist / location-advanced.
   for (const c of delta.changed) {
     if (consumedChangedAfter.has(c.after)) continue;
-    classifyServerOrLocationEntry(c.after, host, edits, refusals);
+    if (classifyServerOrLocationEntry(c.after, host, edits, refusals)) consumedChangedAfter.add(c.after);
   }
   for (const d of delta.added) {
     if (consumedAdded.has(d)) continue;
-    classifyServerOrLocationEntry(d, host, edits, refusals);
+    if (classifyServerOrLocationEntry(d, host, edits, refusals)) consumedAdded.add(d);
   }
   // Only absorb the gzip companions when `gzip on` itself is going away in the
   // same delta; deleting a companion on its own stays a refusal, otherwise the
@@ -574,6 +576,36 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
     }
   }
 
+  // ── Final sweep: nothing may leave this function unexplained ─────────────
+  //
+  // Every branch above is gated on a scope shape it recognises (`[]`,
+  // `["server"]`, `["server", "location …"]`). A ref in any other scope — a
+  // second `server#1` block, the body of an `upstream`, a location that no
+  // longer resolves — used to fall past all of them and vanish: the file
+  // changed, the delta was non-empty, and the save reported success having
+  // written nothing. That is the exact signature of §42/§44/§45/§49.
+  //
+  // Rather than adding a fourth scope-specific branch (and leaving a fifth
+  // shape to be discovered later), anything still unconsumed is refused by
+  // construction. A refusal is always a truthful answer here: it says the
+  // line could not be mapped and points the user at the form. Silence is the
+  // only answer that is never truthful. Guarded by invariant.test.ts.
+  for (const d of delta.added) {
+    if (!consumedAdded.has(d)) {
+      refusals.push({ line: d.line, directive: d.name, reason: REASON_UNMAPPABLE_EDIT });
+    }
+  }
+  for (const c of delta.changed) {
+    if (!consumedChangedAfter.has(c.after)) {
+      refusals.push({ line: c.after.line, directive: c.after.name, reason: REASON_UNMAPPABLE_EDIT });
+    }
+  }
+  for (const d of delta.removed) {
+    if (!consumedRemoved.has(d)) {
+      refusals.push({ line: d.line, directive: d.name, reason: REASON_UNMAPPABLE_REMOVAL });
+    }
+  }
+
   return { edits, refusals };
 }
 
@@ -582,14 +614,14 @@ function classifyServerOrLocationEntry(
   host: HostConfig,
   edits: ClassifiedEdit[],
   refusals: Refusal[]
-): void {
+): boolean {
   // proxy_set_header is emitted from the location's type/forwardScheme/
   // preservePath, never from an editable field, so a hand edit here has no
   // model representation. Refuse loudly with a named remedy instead of
   // absorbing it into raw text where the next regeneration would drop it.
   if (ref.name === "proxy_set_header") {
     refusals.push({ line: ref.line, directive: ref.name, reason: REASON_PROXY_BOILERPLATE });
-    return;
+    return true;
   }
   if (ref.scope.length === 1 && ref.scope[0] === "server" && ref.name !== "location") {
     const entry = SERVER_FIELDS[ref.name];
@@ -598,13 +630,13 @@ function classifyServerOrLocationEntry(
     } else {
       edits.push({ kind: "server-advanced", text: ref.text, label: `${ref.name} → Advanced` });
     }
-    return;
+    return true;
   }
 
   if (ref.scope.length === 2 && ref.scope[0] === "server") {
     const scope = ref.scope[1];
     const index = findLocationIndex(host, scope);
-    if (index < 0) return; // matched-location children should always resolve; guard defensively
+    if (index < 0) return false; // unresolvable location — let the final sweep refuse it
     const loc = host.locations[index];
     const entry = LOCATION_FIELDS[ref.name];
     if (entry) {
@@ -617,7 +649,12 @@ function classifyServerOrLocationEntry(
         label: `${ref.name} → Advanced (location ${loc.path})`,
       });
     }
+    return true;
   }
+
+  // Scopes this function does not recognise (a second `server#1` block, an
+  // `upstream` body, anything nested deeper) reach here unhandled.
+  return false;
 }
 
 // ── Stream branch (Task 8) ──────────────────────────────────────────────
@@ -680,6 +717,8 @@ function findStreamPortIndex(host: StreamHostConfig, port: number, protocol: "tc
 }
 
 type StreamEntry = {
+  /** Set once this entry has produced an edit or a refusal; see the final sweep. */
+  explained?: boolean;
   kind: "added" | "removed" | "changed";
   name: string;
   line: number;
@@ -772,10 +811,14 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
   const byUpstreamIndex = new Map<number, StreamEntry[]>();
   const serverScopeEntries: StreamEntry[] = [];
 
+  /** Every entry ever bucketed, so the final sweep can find the ones nothing spoke for. */
+  const allEntries: StreamEntry[] = [];
+
   function bucket(ref: DirectiveRef, kind: StreamEntry["kind"], beforeArgs?: string[]) {
-    if (ref.scope.length !== 1) return;
-    const idx = upstreamIndexFromScopeKey(host.id, ref.scope[0]);
     const entry: StreamEntry = { kind, name: ref.name, line: ref.line, args: ref.args, beforeArgs };
+    allEntries.push(entry);
+    if (ref.scope.length !== 1) return; // nested deeper than a top-level block — swept below
+    const idx = upstreamIndexFromScopeKey(host.id, ref.scope[0]);
     if (idx !== null) {
       if (!byUpstreamIndex.has(idx)) byUpstreamIndex.set(idx, []);
       byUpstreamIndex.get(idx)!.push(entry);
@@ -799,11 +842,12 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
   // round-trip note on buildUpstreamBlock below).
   for (const [idx, entries] of byUpstreamIndex) {
     const port = host.streamPorts[idx];
-    if (!port) continue; // defensive: index decoded from the name but no matching model entry
+    if (!port) continue; // index decoded from the name but no matching model entry — swept below
 
     const unknown = entries.find((e) => e.name !== "server" && !BALANCE_DIRECTIVE_NAMES.has(e.name));
     if (unknown) {
       refusals.push({ line: unknown.line, directive: unknown.name, reason: REASON_STREAM_UNMAPPABLE });
+      for (const e of entries) e.explained = true;
       continue;
     }
 
@@ -880,6 +924,7 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
         to: upstreams,
         label: `streamPorts[${idx}].upstreams updated`,
       });
+      for (const e of serverEntries) e.explained = true;
     }
     if (balanceMethod !== port.balanceMethod) {
       edits.push({
@@ -890,28 +935,38 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
         to: balanceMethod,
         label: `balanceMethod ${port.balanceMethod} → ${balanceMethod}`,
       });
+      for (const e of entries) e.explained = true;
     }
   }
 
   // 6. Top-level anonymous `server` scope: listen (port/protocol) is
   // whitelisted; proxy_pass and anything else has no field to land in.
   const listenHandled = new Set<number>();
+  const listenByIdx = new Map<number, StreamEntry[]>();
+  const editedListenIdx = new Set<number>();
   for (const e of serverScopeEntries) {
     if (e.name !== "listen") {
       refusals.push({ line: e.line, directive: e.name, reason: REASON_STREAM_UNMAPPABLE });
+      e.explained = true;
       continue;
     }
     if (e.kind !== "changed" || !e.beforeArgs) {
       // An asymmetric listen add/remove (not paired with a matching change)
       // can't be safely attributed to one model port — refuse.
       refusals.push({ line: e.line, directive: "listen", reason: REASON_STREAM_UNMAPPABLE });
+      e.explained = true;
       continue;
     }
     const before = parseListenLine(e.beforeArgs.join(" "));
     const idx = findStreamPortIndex(host, before.port, before.protocol);
+    if (idx < 0) continue; // listen value matches no model port — swept below
+
     // Each stream port emits two `listen` lines (ipv4 + ipv6) that change
-    // together — `listenHandled` collapses the pair into a single edit.
-    if (idx < 0 || listenHandled.has(idx)) continue;
+    // together — `listenHandled` collapses the pair into a single edit, so
+    // both entries are marked explained together once an edit lands.
+    if (!listenByIdx.has(idx)) listenByIdx.set(idx, []);
+    listenByIdx.get(idx)!.push(e);
+    if (listenHandled.has(idx)) continue;
     listenHandled.add(idx);
 
     const after = parseListenLine(e.args.join(" "));
@@ -925,6 +980,7 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
         to: after.port,
         label: `listen ${port.port} → ${after.port}`,
       });
+      editedListenIdx.add(idx);
     }
     if (after.protocol !== port.protocol) {
       edits.push({
@@ -935,7 +991,25 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
         to: after.protocol,
         label: `protocol ${port.protocol} → ${after.protocol}`,
       });
+      editedListenIdx.add(idx);
     }
+  }
+  for (const idx of editedListenIdx) {
+    for (const e of listenByIdx.get(idx) ?? []) e.explained = true;
+  }
+
+  // ── Final sweep: same barrier as the HTTP branch ─────────────────────────
+  //
+  // Reaching a bucket is not the same as being represented by it. A
+  // `listen 5432 zzz_probe;` resolves to port 0 and then produces no edit
+  // because the port and protocol both still match; an unparseable trailing
+  // argument on a `server` line reconstructs to the identical upstream and
+  // compares equal. In both cases the directive was recognised, its actual
+  // change was dropped, and the old code returned an empty classification —
+  // a silent save. Anything no branch marked `explained` is refused here.
+  for (const e of allEntries) {
+    if (e.explained) continue;
+    refusals.push({ line: e.line, directive: e.name, reason: REASON_STREAM_UNMAPPABLE });
   }
 
   return { edits, refusals };
