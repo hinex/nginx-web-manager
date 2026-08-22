@@ -17,6 +17,8 @@ export function syntaxError(content: string): SyntaxProblem | null {
   let line = 1;
   let depth = 0;
   const openLines: number[] = [];
+  /** The word immediately before each open brace, parallel to `openLines`. */
+  const openWords: string[] = [];
   let topLevelServerBlocks = 0;
   let word = "";
   let lastWord = "";
@@ -82,6 +84,7 @@ export function syntaxError(content: string): SyntaxProblem | null {
       }
       depth++;
       openLines.push(line);
+      openWords.push(lastWord);
       lastWord = "";
       i++;
       continue;
@@ -94,6 +97,7 @@ export function syntaxError(content: string): SyntaxProblem | null {
       }
       depth--;
       openLines.pop();
+      openWords.pop();
       lastWord = "";
       i++;
       continue;
@@ -113,7 +117,16 @@ export function syntaxError(content: string): SyntaxProblem | null {
   flushWord();
 
   if (depth > 0) {
-    return { line: openLines[0], message: "Unclosed '{'" };
+    // The *outermost* open brace, deliberately: with `server {` and `location {`
+    // both open, the inner one may well be fine and it is the outer block that is
+    // genuinely unterminated — that is where the missing `}` belongs. Naming the
+    // directive that opened it is the difference between "Unclosed '{'", which
+    // points at a character the file is full of, and an actionable message.
+    const opener = openWords[0];
+    return {
+      line: openLines[0],
+      message: opener ? `Unclosed '{' opened by '${opener}'` : "Unclosed '{'",
+    };
   }
 
   return null;

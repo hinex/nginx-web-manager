@@ -17,7 +17,10 @@ server {
 
   it("detects an unclosed '{' and reports the line it was opened on", () => {
     const content = `server { listen 80;`;
-    expect(syntaxError(content)).toEqual({ line: 1, message: "Unclosed '{'" });
+    expect(syntaxError(content)).toEqual({
+      line: 1,
+      message: "Unclosed '{' opened by 'server'",
+    });
   });
 
   it("detects a stray '}' and reports its line", () => {
@@ -76,5 +79,30 @@ server {
 }
 `;
     expect(syntaxError(content)).toBeNull();
+  });
+});
+
+describe("which unclosed brace is reported", () => {
+  it("reports the outermost unclosed '{' when two blocks are open", () => {
+    const problem = syntaxError(
+      "server {\n" +          // 1 — unclosed
+      "  location / {\n" +    // 2 — unclosed
+      "    proxy_pass http://x;\n" +
+      "\n",
+    );
+    expect(problem).not.toBeNull();
+    expect(problem!.line).toBe(1);
+  });
+
+  it("reports the still-open outer block when only the inner one is closed", () => {
+    const problem = syntaxError(
+      "server {\n" +
+      "  location / {\n" +
+      "    proxy_pass http://x;\n" +
+      "  }\n" +
+      "\n",
+    );
+    expect(problem).not.toBeNull();
+    expect(problem!.line).toBe(1);
   });
 });
