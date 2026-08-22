@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parse } from "~/lib/nginx/parser";
 import { diffAst, type AstDelta } from "./match";
+import { applyEdits } from "./apply";
 import { classifyDelta, classifyStreamDelta, type ClassifiedEdit, type StreamHostConfig } from "./classify";
 import type { HostConfig } from "~/lib/nginx/templates/server-block";
 import { buildStreamBlock } from "~/lib/nginx/templates/stream";
@@ -434,6 +435,52 @@ describe("classifyDelta", () => {
       "Two or more locations changed at once and cannot be matched to model entries"
     );
     expect(c.refusals[0].line).toBeGreaterThan(0);
+  });
+
+  /**
+   * Additions carry no pairing problem. `locationAddedEdit` reads only the
+   * added block, and `applyEdits` appends, so N additions are N independent
+   * edits — the count guard was refusing work it could do. Reported against a
+   * hand-pasted config that added five static locations at once (§60).
+   *
+   * Removals stay under the guard: `findLocationIndex` resolves by `findIndex`,
+   * so two removed locations sharing a path+matchType both answer with the
+   * first index (the §44 collapse shape). Widening that needs occurrence-aware
+   * resolution first; until then the refusal is the honest answer.
+   */
+  it("maps any number of added locations at once", () => {
+    const before = buildServerBlock(baseHost, ACCESS_LISTS);
+    const block = (p: string) =>
+      `    location ${p} {\n        alias /var/static${p};\n        access_log off;\n    }\n\n`;
+    const at = before.indexOf("    location /api {");
+    const after = before.slice(0, at) + block("/assets/") + block("/images/") + block("/static/") + before.slice(at);
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), baseHost);
+    expect(c.refusals).toEqual([]);
+    const added = c.edits.filter((e) => e.kind === "location-added");
+    expect(added.map((e) => (e as { path: string }).path)).toEqual(["/assets/", "/images/", "/static/"]);
+    expect(added.every((e) => (e as { type: string }).type === "static")).toBe(true);
+
+    // The edits must survive apply, not merely classify.
+    const next = applyEdits(baseHost, c.edits);
+    expect(next.locations).toHaveLength(baseHost.locations.length + 3);
+  });
+
+  it("keeps refusing added locations when a location is also removed", () => {
+    const before = buildServerBlock(baseHost, ACCESS_LISTS);
+    const at = before.indexOf("    location /api {");
+    // drop /api, add two — a mixed batch stays unmatchable
+    const end = before.indexOf("}", before.indexOf("proxy_pass", at)) + 1;
+    const after =
+      before.slice(0, at) +
+      `    location /assets/ {\n        alias /var/static/a;\n    }\n\n    location /images/ {\n        alias /var/static/i;\n    }\n` +
+      before.slice(end + 1);
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), baseHost);
+    expect(c.edits.filter((e) => e.kind === "location-removed" || e.kind === "location-added")).toEqual([]);
+    expect(c.refusals[0].reason).toBe(
+      "Two or more locations changed at once and cannot be matched to model entries"
+    );
   });
 
   // ── Unmappable removals must refuse, not silently revert (see NUANCES.md #16) ──

@@ -496,8 +496,18 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
   for (const l of addedLocations) consumedAdded.add(l);
   for (const l of removedLocations) consumedRemoved.add(l);
 
+  // A pure addition needs no pairing at all: locationAddedEdit reads only the
+  // added block and applyEdits appends, so N additions are N independent edits.
+  // The original count guard (design record §refusal 5) refused them anyway,
+  // which rejected an ordinary paste of several static locations (§60).
+  //
+  // Removals stay under the guard. findLocationIndex resolves with findIndex,
+  // so two removed locations sharing path+matchType both answer with the first
+  // index — the §44 collapse shape, applied to deletion. Widening that needs
+  // occurrence-aware index resolution first; until then refusing is honest.
   const locTotal = addedLocations.length + removedLocations.length;
-  if (locTotal >= 2 && !(addedLocations.length === 1 && removedLocations.length === 1)) {
+  const pureAddition = removedLocations.length === 0;
+  if (!pureAddition && locTotal >= 2 && !(addedLocations.length === 1 && removedLocations.length === 1)) {
     const line = Math.min(...removedLocations.map((l) => l.line), ...addedLocations.map((l) => l.line));
     refusals.push({ line, directive: "location", reason: REASON_AMBIGUOUS_LOCATIONS });
   } else {

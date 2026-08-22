@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-08-23
+
+### Fixed
+
+- Adding several locations at once in the config editor is applied instead of refused. Pasting
+  a config with more than one new `location` block returned "Two or more locations changed at
+  once and cannot be matched to model entries" and saved nothing; any number of added locations
+  now maps to that many new entries.
+- The refusal still stands when a location is **removed** in the same save, alone or alongside
+  additions: two removed locations sharing a path and match type resolve to the same model
+  entry, so a deletion is only applied when it is the single structural change.
+
 ## [1.2.1] - 2026-08-23
 
 1.2.0 was tagged but never published: its release run executed the test suite on Node instead
@@ -173,6 +185,7 @@ that publishes managed host configs before upgrading.
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.2.2]: https://github.com/hardskilled/nginx-manager/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/hardskilled/nginx-manager/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/hardskilled/nginx-manager/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/hardskilled/nginx-manager/compare/v1.1.0...v1.1.1
