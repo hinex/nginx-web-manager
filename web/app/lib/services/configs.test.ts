@@ -503,6 +503,42 @@ describe("previewConfigEdit / applyConfigEdit", () => {
     vi.mocked(existsSync).mockReturnValue(false);
   });
 
+  describe("scope naming on managed publish", () => {
+    it("names the file and the host when refusing a managed publish", () => {
+      hostsStore.set(1, makeHostRow());
+      const weak = ctx(["configs:read", "configs:write", "configs:publish"]);
+      try {
+        applyConfigEdit(weak, "conf.d/host-1.conf", baselineText(makeHostRow()));
+        throw new Error("expected ForbiddenError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ForbiddenError);
+        expect((err as ForbiddenError).missingScope).toBe("hosts:publish");
+        expect((err as Error).message).toContain("host-1.conf");
+        expect((err as Error).message).toContain("hosts:publish");
+      }
+    });
+
+    it("still refuses a plain config write without configs:publish, unchanged", () => {
+      const weak = ctx(["configs:read"]);
+      try {
+        applyConfigEdit(weak, "conf.d/site.conf", "server { listen 80; }");
+        throw new Error("expected ForbiddenError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ForbiddenError);
+        expect((err as ForbiddenError).missingScope).toBe("configs:publish");
+        expect((err as Error).message).toBe("token lacks scope configs:publish");
+      }
+    });
+
+    it("lets a fully scoped caller through", () => {
+      hostsStore.set(1, makeHostRow());
+      const strong = ctx(["configs:read", "configs:write", "configs:publish", "hosts:publish"]);
+      expect(() =>
+        applyConfigEdit(strong, "conf.d/host-1.conf", baselineText(makeHostRow()))
+      ).not.toThrow();
+    });
+  });
+
   it("falls through to a plain live write for a non-host-N.conf path", () => {
     const result = applyConfigEdit(auth, "conf.d/site.conf", "server { listen 80; }");
     expect(result.applied).toEqual([]);

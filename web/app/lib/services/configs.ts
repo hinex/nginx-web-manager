@@ -10,7 +10,7 @@ import {
 import { resolve, dirname, join, basename } from "path";
 import { eq } from "drizzle-orm";
 import type { AuthContext } from "~/lib/auth/authenticate";
-import { requireScope, InvalidPathError, NotFoundError, ConfigClassificationError } from "./errors";
+import { requireScope, ForbiddenError, InvalidPathError, NotFoundError, ConfigClassificationError } from "./errors";
 import { saveVersion } from "~/lib/config/versions";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { reloadNginx } from "~/lib/nginx/reload";
@@ -567,7 +567,16 @@ export function applyConfigEdit(
     return { ...writeConfigLive(auth, filePath, content), applied: [] };
   }
 
-  requireScope(auth, "hosts:publish");
+  // A bare "token lacks scope hosts:publish" on a *config* write reads like a
+  // bug: the caller asked to write a file and was told about host rights.
+  // Name the file and the host so the cause — this .conf is a managed host,
+  // so the write mutates the host model — is in the message itself.
+  if (!auth.scopes.includes("hosts:publish")) {
+    throw new ForbiddenError(
+      "hosts:publish",
+      `${filePath} is the generated config for host ${c.hostId}; writing it updates the host model and needs the hosts:publish scope in addition to configs:publish`
+    );
+  }
 
   if (c.refusals.length > 0) {
     throw new ConfigClassificationError(c.refusals);

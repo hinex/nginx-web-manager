@@ -4,8 +4,14 @@ import type { Refusal } from "~/lib/nginx/reverse/classify";
 
 export class ForbiddenError extends Error {
   missingScope: Scope;
-  constructor(missingScope: Scope) {
-    super(`token lacks scope ${missingScope}`);
+  /**
+   * `detail` replaces the default message when the bare scope name would not
+   * tell the caller *why* this particular request needed it. `missingScope`
+   * keeps its meaning and type either way, so `toResponse` (shared.ts:22) and
+   * the MCP error path are untouched.
+   */
+  constructor(missingScope: Scope, detail?: string) {
+    super(detail ?? `token lacks scope ${missingScope}`);
     this.name = "ForbiddenError";
     this.missingScope = missingScope;
   }

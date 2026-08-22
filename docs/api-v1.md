@@ -241,7 +241,9 @@ The draft is always written regardless of validity.
 
 Promote the `.conf.draft` to live. Runs `nginx -t`; if invalid, restores the previous live content and returns `published: false`. On success, reloads nginx.
 
-- **Scope:** `configs:publish`
+- **Scope:** `configs:publish` — plus `hosts:publish` when `path` is a managed
+  `host-<id>.conf` / `host-<id>-stream.conf`, because publishing it writes the edits back into
+  the host model. A token holding only `configs:publish` gets `403` naming the file and the host.
 - **Query param:** `path` (required) — path to the `.conf` file (not the draft)
 - **Request body:** none
 - **Response 200 (success):**

@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking
+
+- Publishing or writing a managed `host-<id>.conf` / `host-<id>-stream.conf` through
+  `PUT /api/v1/configs/file`, `publish_config` or `write_config` now requires the
+  `hosts:publish` scope in addition to `configs:publish`. Such a write is reverse-synced into
+  the host model, so it needs host rights; the `403` names the file and the host id rather than
+  reporting a bare missing scope. Editing a hand-written `conf.d/*.conf` is unaffected.
+- A hand edit that cannot be mapped back to a host field now returns `409` with a per-line
+  refusal instead of succeeding and discarding the change. This affects edits inside a second
+  `server` block, inside an `upstream` body, and unrecognised arguments on stream
+  `listen` / `server` / balance directives — all of which previously reported success and
+  wrote nothing.
+
+### Fixed
+
+- Custom response headers (`add_header`) on a location are now read back correctly when a config
+  is hand-edited; previously the classifier read `proxy_set_header` instead, writing request
+  headers into the response-header field and reverting the user's edit on the next save.
+- Inserting a header next to an existing one no longer fabricates a second, unrelated edit.
+
 ## [1.1.1] - 2026-07-13
 
 ### Added
