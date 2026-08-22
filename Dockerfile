@@ -9,7 +9,10 @@ COPY web/ ./
 RUN bun run build
 
 # ─── Stage 2: Runtime ────────────────────────────────────
-FROM nginx:1.29-bookworm
+# nginx 1.30 is the current stable branch; 1.29 was mainline and stopped
+# receiving patches when 1.30/1.31 superseded it. The Debian base moves with it
+# (bookworm is not published for 1.30+, only trixie).
+FROM nginx:1.30-trixie
 
 # Install runtime dependencies + s6-overlay prerequisites
 RUN apt-get update && apt-get install -y --no-install-recommends \

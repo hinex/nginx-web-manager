@@ -374,7 +374,7 @@ The script updates `web/package.json` and validates the semver format.
 - [Fuse.js](https://www.fusejs.io) — Client-side fuzzy search
 
 ### Proxy
-- [Nginx](https://nginx.org) 1.29 — Battle-tested HTTP/stream proxy
+- [Nginx](https://nginx.org) 1.30 (stable) — Battle-tested HTTP/stream proxy
 
 ### Infrastructure
 - [s6-overlay](https://github.com/just-containers/s6-overlay) — Process supervisor
