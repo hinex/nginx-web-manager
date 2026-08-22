@@ -492,6 +492,32 @@ describe("discardHostDraft", () => {
 // ─── publishHost happy path ───────────────────────────────────────────────────
 
 describe("publishHost — happy path", () => {
+  it("clears an optional field the user emptied", async () => {
+    const row = await createHost(ctx(["hosts:write"]), {
+      ...validDraft,
+      advancedNginx: "proxy_buffer_size 128k;",
+    });
+    await publishHost(ctx(["hosts:publish"]), row.id);
+    expect(_store.get(row.id)!.advancedNginx).toBe("proxy_buffer_size 128k;");
+
+    await updateHost(ctx(["hosts:write"]), row.id, { advancedNginx: "" });
+    await publishHost(ctx(["hosts:publish"]), row.id);
+    expect(_store.get(row.id)!.advancedNginx).toBeNull();
+  });
+
+  it("keeps an emptied clientMaxBodySize at the column default", async () => {
+    const row = await createHost(ctx(["hosts:write"]), {
+      ...validDraft,
+      clientMaxBodySize: "25m",
+    });
+    await publishHost(ctx(["hosts:publish"]), row.id);
+    expect(_store.get(row.id)!.clientMaxBodySize).toBe("25m");
+
+    await updateHost(ctx(["hosts:write"]), row.id, { clientMaxBodySize: "" });
+    await publishHost(ctx(["hosts:publish"]), row.id);
+    expect(_store.get(row.id)!.clientMaxBodySize).toBe("1m");
+  });
+
   it("moves draft to live fields, clears draft, calls reload once", async () => {
     const row = await createHost(ctx(["hosts:write"]), { ...validDraft });
 

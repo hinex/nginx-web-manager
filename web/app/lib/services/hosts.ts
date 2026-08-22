@@ -17,6 +17,7 @@ import { db } from "~/lib/db/connection";
 import { hosts } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { hashBasicAuthPasswords } from "~/lib/auth/hash-basic-auth";
+import { nullableHostFields, clientMaxBodySizeOf } from "~/lib/hosts/publish-fields";
 import { validatePublishData } from "~/lib/hosts/validate";
 import { generateAllConfigs, removeHostConfig } from "~/lib/nginx/generator";
 import { validateNginxConfig } from "~/lib/nginx/validator";
@@ -296,6 +297,14 @@ export async function publishHost(auth: AuthContext, id: number): Promise<HostRo
     existingLocations
   );
 
+  // A cleared optional field is null. `|| undefined` used to stand here, and
+  // drizzle drops undefined keys from the UPDATE, so emptying one of these
+  // reported success and left the old value in the column. Note the explicit
+  // field list rather than a spread of `nullable`: `customPrelude` is not a
+  // REST input (see ALLOWED_INPUT_KEYS) and this path does not own it, so
+  // spreading it in would clear whatever the config editor had put there.
+  const nullable = nullableHostFields(effective as Record<string, string | null | undefined>);
+
   // 3. Write effective to main columns + clear draft
   db.update(hosts)
     .set({
@@ -304,8 +313,8 @@ export async function publishHost(auth: AuthContext, id: number): Promise<HostRo
       enabled: (effective.enabled as boolean) ?? true,
       sslType: (effective.sslType as any) ?? "none",
       sslForceHttps: (effective.sslForceHttps as boolean) ?? false,
-      sslCertPath: (effective.sslCertPath as string | undefined) || undefined,
-      sslKeyPath: (effective.sslKeyPath as string | undefined) || undefined,
+      sslCertPath: nullable.sslCertPath,
+      sslKeyPath: nullable.sslKeyPath,
       hsts: (effective.hsts as boolean) ?? true,
       http2: (effective.http2 as boolean) ?? true,
       compression: (effective.compression as boolean) ?? true,
@@ -313,9 +322,9 @@ export async function publishHost(auth: AuthContext, id: number): Promise<HostRo
       locations: hashed.locations as any,
       basicAuth: hashed.basicAuth as any,
       streamPorts: (effective.streamPorts as any) ?? [],
-      webhookUrl: (effective.webhookUrl as string | undefined) || undefined,
-      advancedNginx: (effective.advancedNginx as string | undefined) || undefined,
-      clientMaxBodySize: (effective.clientMaxBodySize as string | undefined) || undefined,
+      webhookUrl: nullable.webhookUrl,
+      advancedNginx: nullable.advancedNginx,
+      clientMaxBodySize: clientMaxBodySizeOf(effective.clientMaxBodySize as string | undefined),
       draft: null,
       updatedAt: new Date(),
     })

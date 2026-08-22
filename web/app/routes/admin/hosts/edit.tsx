@@ -11,6 +11,7 @@ import { generateAllConfigs } from "~/lib/nginx/generator";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { hashBasicAuthPasswords } from "~/lib/auth/hash-basic-auth";
+import { nullableHostFields, clientMaxBodySizeOf } from "~/lib/hosts/publish-fields";
 import { validatePublishData } from "~/lib/hosts/validate";
 import { restoreSnapshot } from "~/lib/services/hosts";
 
@@ -155,6 +156,12 @@ export async function action({ request, params }: Route.ActionArgs) {
   // a broken host. Mirrors publishHost's snapshot/restore (hosts.ts:107, :326).
   const snapshot = db.select().from(hosts).where(eq(hosts.id, id)).get();
 
+  // A cleared optional field is null. `|| undefined` used to stand in the six
+  // lines below, and drizzle drops undefined keys from the UPDATE, so emptying
+  // any of them reported success and left the old value in the column and in
+  // the config regenerated from it.
+  const nullable = nullableHostFields(data);
+
   db.update(hosts)
     .set({
       domains: data.domains,
@@ -162,8 +169,8 @@ export async function action({ request, params }: Route.ActionArgs) {
       enabled: data.enabled,
       sslType: data.sslType as any,
       sslForceHttps: data.sslForceHttps,
-      sslCertPath: data.sslCertPath || undefined,
-      sslKeyPath: data.sslKeyPath || undefined,
+      sslCertPath: nullable.sslCertPath,
+      sslKeyPath: nullable.sslKeyPath,
       hsts: data.hsts,
       http2: data.http2,
       compression: data.compression,
@@ -171,10 +178,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       locations: hashed.locations as any,
       basicAuth: hashed.basicAuth as any,
       streamPorts: data.streamPorts as any,
-      webhookUrl: data.webhookUrl || undefined,
-      advancedNginx: data.advancedNginx || undefined,
-      customPrelude: data.customPrelude || undefined,
-      clientMaxBodySize: data.clientMaxBodySize || undefined,
+      webhookUrl: nullable.webhookUrl,
+      advancedNginx: nullable.advancedNginx,
+      customPrelude: nullable.customPrelude,
+      clientMaxBodySize: clientMaxBodySizeOf(data.clientMaxBodySize),
       draft: null,
       updatedAt: new Date(),
     })
