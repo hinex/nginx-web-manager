@@ -164,3 +164,71 @@ server {
     expect(delta.removed).toEqual([]);
   });
 });
+
+const twoServers = parse(`
+server {
+    listen 80;
+    server_name www.example.com;
+    return 301 https://example.com$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name example.com;
+    client_max_body_size 5m;
+}
+`);
+
+describe("sibling blocks that share a scope key", () => {
+  it("detects an edit inside the first of two server blocks", () => {
+    const delta = diffAst(twoServers, parse(`
+server {
+    listen 8080;
+    server_name www.example.com;
+    return 301 https://example.com$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name example.com;
+    client_max_body_size 5m;
+}
+`));
+    expect(delta.changed).toHaveLength(1);
+    expect(delta.changed[0].after.args).toEqual(["8080"]);
+    expect(delta.changed[0].after.scope).toEqual(["server"]);
+  });
+
+  it("suffixes the scope key of later occurrences only", () => {
+    const delta = diffAst(twoServers, parse(`
+server {
+    listen 80;
+    server_name www.example.com;
+    return 301 https://example.com$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name example.com;
+    client_max_body_size 50m;
+}
+`));
+    expect(delta.changed).toHaveLength(1);
+    expect(delta.changed[0].after.scope).toEqual(["server#1"]);
+  });
+
+  it("does not silently swallow the removal of the first server block", () => {
+    const delta = diffAst(twoServers, parse(`
+server {
+    listen 443 ssl;
+    server_name example.com;
+    client_max_body_size 5m;
+}
+`));
+    expect(delta.added.length + delta.removed.length + delta.changed.length).toBeGreaterThan(0);
+  });
+
+  it("still pairs a lone server block on the bare key", () => {
+    const one = parse(`server { listen 80; }`);
+    const delta = diffAst(one, parse(`server { listen 81; }`));
+    expect(delta.changed).toHaveLength(1);
+    expect(delta.changed[0].after.scope).toEqual(["server"]);
+  });
+});

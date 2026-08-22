@@ -37,6 +37,29 @@ export function diffAst(expected: NgxConfig, actual: NgxConfig): AstDelta {
   return delta;
 }
 
+/**
+ * Pair sibling blocks by scope key, disambiguating duplicates by occurrence.
+ *
+ * An anonymous `server {}` has no args, so scopeKey() returns the bare "server"
+ * for every one of them. Building a Map straight from those keys keeps only the
+ * last sibling and drops the rest before they are ever compared — an edit to any
+ * earlier sibling then produces an empty delta, i.e. no edit AND no refusal.
+ * The first occurrence keeps the bare key so existing scope comparisons
+ * (`scope[0] === "server"`) are unaffected; later ones get a "#N" suffix, which
+ * also tells the stream classifier which port a delta belongs to.
+ */
+function indexBlocks(blocks: NgxDirective[]): Map<string, NgxDirective> {
+  const seen = new Map<string, number>();
+  const out = new Map<string, NgxDirective>();
+  for (const d of blocks) {
+    const base = scopeKey(d);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    out.set(n === 0 ? base : `${base}#${n}`, d);
+  }
+  return out;
+}
+
 function walk(
   expected: NgxDirective[],
   actual: NgxDirective[],
@@ -49,8 +72,8 @@ function walk(
   const actSimple = actual.filter((d) => !d.block);
 
   // --- Block directives: pair by identity, recurse into matched bodies ---
-  const expByKey = new Map(expBlocks.map((d) => [scopeKey(d), d]));
-  const actByKey = new Map(actBlocks.map((d) => [scopeKey(d), d]));
+  const expByKey = indexBlocks(expBlocks);
+  const actByKey = indexBlocks(actBlocks);
 
   for (const [key, actDir] of actByKey) {
     const expDir = expByKey.get(key);

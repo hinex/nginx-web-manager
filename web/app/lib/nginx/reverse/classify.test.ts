@@ -1058,4 +1058,61 @@ server {
     const c = classifyStreamDelta(streamDeltaFor(baseStreamHost, actual), baseStreamHost);
     expect(c.edits.some((e) => e.kind === "stream-field" && e.field === "balanceMethod")).toBe(false);
   });
+  // Two-port hosts: every anonymous `server {}` renders with the identical
+  // scope key, so before match.ts indexed them by occurrence an edit to any
+  // port but the last one produced zero edits AND zero refusals.
+  const twoPortHost: StreamHostConfig = {
+    id: 7,
+    streamPorts: [
+      {
+        port: 9000,
+        protocol: "tcp",
+        upstreams: [{ server: "10.0.0.1", port: 9000, weight: 1 }],
+        balanceMethod: "round_robin",
+      },
+      {
+        port: 9500,
+        protocol: "tcp",
+        upstreams: [{ server: "10.0.0.2", port: 9500, weight: 1 }],
+        balanceMethod: "round_robin",
+      },
+    ],
+  };
+
+  it("maps an edit to the FIRST port of a two-port host", () => {
+    const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+    const actual = expectedText
+      .replace("listen 9000;", "listen 9010;")
+      .replace("listen [::]:9000;", "listen [::]:9010;");
+    expect(actual).not.toBe(expectedText);
+    const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", index: 0, field: "port", from: 9000, to: 9010 })
+    );
+  });
+
+  it("maps an edit to the SECOND port of a two-port host", () => {
+    const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+    const actual = expectedText
+      .replace("listen 9500;", "listen 9510;")
+      .replace("listen [::]:9500;", "listen [::]:9510;");
+    expect(actual).not.toBe(expectedText);
+    const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+    expect(c.refusals).toEqual([]);
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "stream-field", index: 1, field: "port", from: 9500, to: 9510 })
+    );
+  });
+
+  it("never returns an empty result for an edited two-port host", () => {
+    const expectedText = buildStreamBlock(twoPortHost.id, twoPortHost.streamPorts, null, null);
+    for (const [from, to] of [["9000", "9010"], ["9500", "9510"]]) {
+      const actual = expectedText
+        .replace(`listen ${from};`, `listen ${to};`)
+        .replace(`listen [::]:${from};`, `listen [::]:${to};`);
+      const c = classifyStreamDelta(diffAst(parse(expectedText), parse(actual)), twoPortHost);
+      expect(c.edits.length + c.refusals.length).toBeGreaterThan(0);
+    }
+  });
 });

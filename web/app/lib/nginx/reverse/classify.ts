@@ -714,13 +714,15 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
   // from the `upstream stream_host_<id>_port_<i>` scope name) or by the
   // top-level anonymous `server` scope (listen/proxy_pass/unknown).
   //
-  // NOTE: for hosts with more than one stream port, every anonymous
-  // `server {}` block shares the identical scopeKey "server" (no args to
-  // distinguish them) — match.ts's Map-based block pairing (see match.ts
-  // walk(), expByKey/actByKey) silently collapses them to a single
-  // comparison, the same pre-existing limitation already documented for
-  // HTTP's "second server block" case (NUANCES.md #15). We do not attempt
-  // to fix that here (out of this task's file list) — see NUANCES.md #39.
+  // Anonymous `server {}` blocks all render with the same scopeKey, so
+  // match.ts indexBlocks() disambiguates siblings by occurrence: the first
+  // keeps the bare "server", later ones become "server#1", "server#2", …
+  // The suffix is accepted here but not used to pick the port — a `listen`
+  // edit is attributed by its *value* via findStreamPortIndex() below,
+  // which stays correct even if the blocks are reordered in the file.
+  /** The bare "server" plus the "#N" occurrence suffixes from match.ts indexBlocks(). */
+  const ANON_SERVER_SCOPE = /^server(#\d+)?$/;
+
   const byUpstreamIndex = new Map<number, StreamEntry[]>();
   const serverScopeEntries: StreamEntry[] = [];
 
@@ -731,7 +733,7 @@ export function classifyStreamDelta(delta: AstDelta, host: StreamHostConfig): Cl
     if (idx !== null) {
       if (!byUpstreamIndex.has(idx)) byUpstreamIndex.set(idx, []);
       byUpstreamIndex.get(idx)!.push(entry);
-    } else if (ref.scope[0] === "server") {
+    } else if (ANON_SERVER_SCOPE.test(ref.scope[0])) {
       serverScopeEntries.push(entry);
     }
   }
