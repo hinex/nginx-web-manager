@@ -5,6 +5,7 @@ import { classifyDelta, classifyStreamDelta, type ClassifiedEdit, type StreamHos
 import type { HostConfig } from "~/lib/nginx/templates/server-block";
 import { buildStreamBlock } from "~/lib/nginx/templates/stream";
 import { buildServerBlock } from "~/lib/nginx/templates/server-block";
+import type { AccessListWithRules } from "~/lib/nginx/templates/access";
 
 const baseHost: HostConfig = {
   id: 7,
@@ -19,7 +20,7 @@ const baseHost: HostConfig = {
   http2: false,
   compression: false,
   redirectWww: false,
-  clientMaxBodySize: "1m",
+  clientMaxBodySize: "10m",
   locations: [
     {
       path: "/api",
@@ -53,22 +54,66 @@ const baseHost: HostConfig = {
   dnsResolverValid: null,
 };
 
-const BASE_SERVER = `
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`;
+/**
+ * The baseline every test in this file diffs against is **generator output**,
+ * never a hand-written approximation of it.
+ *
+ * It used to be a hand-written `BASE_SERVER` literal, and it encoded the header
+ * direction backwards: it carried `proxy_set_header X-Real-IP $remote_addr;`
+ * and no `add_header` at all, even though `baseHost.locations[0].headers` is a
+ * *response* header map. 697 tests agreed with that fixture, so the classifier
+ * reading `headers` off the wrong directive went unnoticed until a hand test
+ * against real output caught it (NUANCES §49, §50). A fixture that the
+ * generator would never emit only ever proves the classifier agrees with the
+ * fixture.
+ *
+ * Each test below therefore states its edit as a `.replace()` on this baseline,
+ * which also makes the one line under test visible in the diff.
+ */
+const ACCESS_LISTS = new Map<number, AccessListWithRules>([
+  [
+    3,
+    {
+      id: 3,
+      name: "office",
+      satisfy: "any",
+      clients: [{ address: "10.0.0.0/8", directive: "allow" }],
+      auth: [],
+    },
+  ],
+]);
 
+const BASE_SERVER = buildServerBlock(baseHost, ACCESS_LISTS);
 const expected = parse(BASE_SERVER);
 
 function deltaFor(actualText: string) {
   return diffAst(expected, parse(actualText));
+}
+
+/** Like `edited`, for a baseline other than BASE_SERVER. */
+function changed(text: string, from: string, to: string): string {
+  const out = text.replace(from, to);
+  if (out === text) throw new Error(`fixture edit did not apply: ${from}`);
+  return out;
+}
+
+/** Asserts the edit actually lands — `.replace()` silently no-ops on a typo. */
+function edited(from: string, to: string): string {
+  const out = BASE_SERVER.replace(from, to);
+  if (out === BASE_SERVER) throw new Error(`fixture edit did not apply: ${from}`);
+  return out;
+}
+
+/** Inserts a block just before the server block's closing brace. */
+function appended(block: string): string {
+  return edited("    }\n\n}", `    }\n\n    ${block}\n\n}`);
+}
+
+/** Drops the whole `location /api {…}` block — it is the last one in the file. */
+function withoutApiLocation(): string {
+  const at = BASE_SERVER.indexOf("    location /api {");
+  if (at < 0) throw new Error("fixture no longer contains location /api");
+  return BASE_SERVER.slice(0, at) + "}\n";
 }
 
 function findEdit(edits: ClassifiedEdit[], kind: ClassifiedEdit["kind"]) {
@@ -78,42 +123,22 @@ function findEdit(edits: ClassifiedEdit[], kind: ClassifiedEdit["kind"]) {
 describe("classifyDelta", () => {
   it("maps a changed client_max_body_size to the host field", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 50m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`),
+      deltaFor(edited("client_max_body_size 10m;", "client_max_body_size 50m;")),
       baseHost
     );
     expect(c.refusals).toEqual([]);
     expect(c.edits).toContainEqual({
       kind: "field",
       field: "clientMaxBodySize",
-      from: "1m",
+      from: "10m",
       to: "50m",
-      label: "client_max_body_size 1m → 50m",
+      label: "client_max_body_size 10m → 50m",
     });
   });
 
   it("maps changed server_name to domains[]", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name a.com b.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`),
+      deltaFor(edited("server_name example.com;", "server_name a.com b.com;")),
       baseHost
     );
     expect(c.refusals).toEqual([]);
@@ -126,19 +151,11 @@ server {
     });
   });
 
+  // The generator points proxy_pass at the upstream block, not at an address,
+  // so editing it to a literal is a user taking the location off the upstream.
   it("maps a changed proxy_pass to the location upstream", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.2:9090;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`),
+      deltaFor(edited("proxy_pass http://host_7_loc_0;", "proxy_pass http://10.0.0.2:9090;")),
       baseHost
     );
     expect(c.refusals).toEqual([]);
@@ -154,18 +171,12 @@ server {
 
   it("puts an unrecognised directive inside a location into location-advanced", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 300s;
-    }
-}
-`),
+      deltaFor(
+        edited(
+          "        proxy_http_version 1.1;",
+          "        proxy_http_version 1.1;\n        proxy_read_timeout 300s;"
+        )
+      ),
       baseHost
     );
     expect(c.edits).toContainEqual(
@@ -179,18 +190,9 @@ server {
 
   it("puts an unrecognised directive inside server{} into server-advanced", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    server_tokens off;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`),
+      deltaFor(
+        edited("    client_max_body_size 10m;", "    client_max_body_size 10m;\n    server_tokens off;")
+      ),
       baseHost
     );
     expect(c.edits).toContainEqual(
@@ -203,47 +205,22 @@ server {
 
   it("puts an upstream block outside server{} into the prelude", () => {
     const c = classifyDelta(
-      deltaFor(`
-upstream backend {
-    server 10.0.0.5:9000;
-}
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`),
+      deltaFor(
+        edited(
+          "upstream host_7_loc_0 {",
+          "upstream backend {\n    server 10.0.0.5:9000;\n}\n\nupstream host_7_loc_0 {"
+        )
+      ),
       baseHost
     );
-    expect(c.edits).toContainEqual(
-      expect.objectContaining({
-        kind: "prelude",
-      })
-    );
+    expect(c.edits).toContainEqual(expect.objectContaining({ kind: "prelude" }));
     const prelude = findEdit(c.edits, "prelude");
     expect(prelude && "text" in prelude ? prelude.text : "").toContain("upstream backend");
   });
 
   it("classifies a new location with no recognisable core as type advanced", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-    location /health {
-        return 200 "ok";
-    }
-}
-`),
+      deltaFor(appended('location /health {\n        return 200 "ok";\n    }')),
       baseHost
     );
     expect(c.refusals).toEqual([]);
@@ -259,20 +236,7 @@ server {
 
   it("classifies a new location with proxy_pass as a proxy location", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-    location /new {
-        proxy_pass http://10.0.0.9:9999;
-    }
-}
-`),
+      deltaFor(appended("location /new {\n        proxy_pass http://10.0.0.9:9999;\n    }")),
       baseHost
     );
     expect(c.refusals).toEqual([]);
@@ -287,16 +251,7 @@ server {
   });
 
   it("enumerates by name everything lost with a removed location", () => {
-    const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-}
-`),
-      baseHost
-    );
+    const c = classifyDelta(deltaFor(withoutApiLocation()), baseHost);
     expect(c.refusals).toEqual([]);
     const removed = findEdit(c.edits, "location-removed");
     expect(removed && "losing" in removed ? removed.losing : []).toEqual([
@@ -307,202 +262,98 @@ server {
     expect(removed && "index" in removed ? removed.index : -1).toBe(0);
   });
 
-  it("turns a removed Strict-Transport-Security header into hsts:false", () => {
-    const withHsts = `
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`;
-    const delta = diffAst(parse(withHsts), parse(BASE_SERVER));
-    const c = classifyDelta(delta, { ...baseHost, hsts: true });
-    expect(c.refusals).toEqual([]);
-    expect(c.edits).toContainEqual(
-      expect.objectContaining({ kind: "field", field: "hsts", from: true, to: false })
-    );
-  });
 
-  it("turns a removed gzip directive into compression:false", () => {
-    const withGzip = `
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    gzip on;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`;
-    const delta = diffAst(parse(withGzip), parse(BASE_SERVER));
-    const c = classifyDelta(delta, { ...baseHost, compression: true });
-    expect(c.refusals).toEqual([]);
-    expect(c.edits).toContainEqual(
-      expect.objectContaining({ kind: "field", field: "compression", from: true, to: false })
-    );
-  });
+
+  // `hsts`, `compression`, `http2`, `sslForceHttps` and `redirectWww` removals
+  // used to be tested here against hand-written "with the flag on" fixtures.
+  // They are covered by "flag removals against real parser output" below, which
+  // builds both sides with the generator and asserts the flag really renders
+  // something — strictly stronger, so the hand-written pairs are gone.
 
   it("refuses a ssl_certificate change on a letsencrypt host", () => {
-    const sslExpected = `
-server {
-    listen 80;
-    listen 443 ssl;
-    server_name example.com;
-    ssl_certificate /etc/nginx/certs/example.com.pem;
-    ssl_certificate_key /etc/nginx/certs/example.com.key;
-}
-`;
-    const sslActual = `
-server {
-    listen 80;
-    listen 443 ssl;
-    server_name example.com;
-    ssl_certificate /custom/example.com.pem;
-    ssl_certificate_key /etc/nginx/certs/example.com.key;
-}
-`;
-    const certChange = diffAst(parse(sslExpected), parse(sslActual));
+    // The generator ignores sslCertPath for ACME hosts and writes the
+    // /etc/letsencrypt path itself — the old fixture named a path it never
+    // emits, so the test never saw the line the user would actually be editing.
+    const host: HostConfig = { ...baseHost, sslType: "letsencrypt" };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, "/etc/letsencrypt/live/example.com/fullchain.pem", "/custom.pem");
 
-    const c = classifyDelta(certChange, { ...baseHost, sslType: "letsencrypt" });
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
     expect(c.edits).toEqual([]);
     expect(c.refusals[0].reason).toMatch(/ACME/);
     expect(c.refusals[0].line).toBeGreaterThan(0);
   });
 
   it("accepts a ssl_certificate change on a custom-ssl host", () => {
-    const sslExpected = `
-server {
-    listen 80;
-    listen 443 ssl;
-    server_name example.com;
-    ssl_certificate /etc/nginx/certs/example.com.pem;
-    ssl_certificate_key /etc/nginx/certs/example.com.key;
-}
-`;
-    const sslActual = `
-server {
-    listen 80;
-    listen 443 ssl;
-    server_name example.com;
-    ssl_certificate /custom/example.com.pem;
-    ssl_certificate_key /etc/nginx/certs/example.com.key;
-}
-`;
-    const certChange = diffAst(parse(sslExpected), parse(sslActual));
+    const host: HostConfig = { ...baseHost, sslType: "custom", sslCertPath: "/c.pem", sslKeyPath: "/k.pem" };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, "ssl_certificate /c.pem;", "ssl_certificate /custom.pem;");
 
-    const c = classifyDelta(certChange, { ...baseHost, sslType: "custom" });
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
     expect(c.refusals).toEqual([]);
     expect(c.edits).toContainEqual(expect.objectContaining({ kind: "field", field: "sslCertPath" }));
   });
 
   it("refuses an edited resolver directive", () => {
-    const resolverExpected = `
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        resolver 8.8.8.8 valid=30s;
-        proxy_pass http://10.0.0.1:8080;
-    }
-}
-`;
-    const resolverActual = `
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        resolver 1.1.1.1 valid=30s;
-        proxy_pass http://10.0.0.1:8080;
-    }
-}
-`;
-    const delta = diffAst(parse(resolverExpected), parse(resolverActual));
-    const c = classifyDelta(delta, baseHost);
+    const host: HostConfig = { ...baseHost, dnsResolver: "8.8.8.8", dnsResolverValid: "30s" };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, "resolver 8.8.8.8 valid=30s;", "resolver 1.1.1.1 valid=30s;");
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
     expect(c.edits).toEqual([]);
     expect(c.refusals[0].reason).toMatch(/global settings/);
   });
 
   it("refuses set $backend_1 edits", () => {
-    const setExpected = `
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        set $backend_host_7_loc_0 "http://10.0.0.1:8080";
-        proxy_pass $backend_host_7_loc_0;
-    }
-}
-`;
-    const setActual = `
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        set $backend_host_7_loc_0 "http://10.0.0.2:8080";
-        proxy_pass $backend_host_7_loc_0;
-    }
-}
-`;
-    const delta = diffAst(parse(setExpected), parse(setActual));
-    const c = classifyDelta(delta, baseHost);
+    // A single upstream plus a resolver makes the generator emit a variable
+    // proxy_pass instead of an upstream block — that is the only shape in which
+    // `set $backend_…` exists at all.
+    const host: HostConfig = { ...baseHost, dnsResolver: "8.8.8.8", dnsResolverValid: "30s" };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, '"http://10.0.0.1:8080"', '"http://10.0.0.2:8080"');
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
     expect(c.refusals.some((r) => r.reason.match(/global settings/))).toBe(true);
   });
 
   it("refuses deleting listen 443 ssl", () => {
-    const sslExpected = `
-server {
-    listen 80;
-    listen 443 ssl;
-    server_name example.com;
-}
-`;
-    const sslActual = `
-server {
-    listen 80;
-    server_name example.com;
-}
-`;
-    const delta = diffAst(parse(sslExpected), parse(sslActual));
-    const c = classifyDelta(delta, { ...baseHost, sslType: "custom" });
+    const host: HostConfig = { ...baseHost, sslType: "custom", sslCertPath: "/c.pem", sslKeyPath: "/k.pem" };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    // The generator emits the ipv4 and ipv6 lines as a pair; turning SSL off by
+    // hand means deleting both. The old hand-written fixture only ever had one.
+    const after = changed(
+      changed(before, "    listen 443 ssl;\n", ""),
+      "    listen [::]:443 ssl;\n",
+      ""
+    );
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
     expect(c.edits).toEqual([]);
     expect(c.refusals[0].reason).toMatch(/SSL tab/);
   });
 
+  // Deleting only half the ipv4/ipv6 pair leaves the survivor to be paired
+  // positionally against the deleted line, which reports as a changed `listen`
+  // and yields a cosmetic "listen → Advanced" entry alongside the refusal (the
+  // HTTP branch has no `listenHandled` pair-collapsing, unlike the stream one —
+  // NUANCES §56). Harmless because any refusal blocks the whole save, but the
+  // refusal itself must still be there.
+  it("refuses deleting half of the listen 443 pair", () => {
+    const host: HostConfig = { ...baseHost, sslType: "custom", sslCertPath: "/c.pem", sslKeyPath: "/k.pem" };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const after = changed(before, "    listen 443 ssl;\n", "");
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
+    expect(c.refusals.some((r) => /SSL tab/.test(r.reason))).toBe(true);
+  });
+
   it("refuses renaming a stream_host upstream", () => {
-    const upExpected = `
-upstream host_7_loc_0 {
-    server 10.0.0.1:8080;
-}
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        proxy_pass http://host_7_loc_0;
-    }
-}
-`;
-    const upActual = `
-upstream mine {
-    server 10.0.0.1:8080;
-}
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        proxy_pass http://mine;
-    }
-}
-`;
-    const delta = diffAst(parse(upExpected), parse(upActual));
-    const c = classifyDelta(delta, baseHost);
+    const after = BASE_SERVER.replaceAll("host_7_loc_0", "mine");
+    expect(after).not.toBe(BASE_SERVER);
+
+    const c = classifyDelta(deltaFor(after), baseHost);
     expect(c.refusals[0].reason).toMatch(/internal link identifier/);
+
     // The paired "added" upstream must not also leak out as an accepted prelude edit.
     expect(c.edits.some((e) => e.kind === "prelude")).toBe(false);
   });
@@ -538,26 +389,19 @@ server {
   });
 
   it("refuses two unmatchable locations at once", () => {
-    const twoLocExpected = `
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-    }
-    location /other {
-        proxy_pass http://10.0.0.2:8080;
-    }
-}
-`;
-    const twoLocActual = `
-server {
-    listen 80;
-    server_name example.com;
-}
-`;
-    const delta = diffAst(parse(twoLocExpected), parse(twoLocActual));
-    const c = classifyDelta(delta, baseHost);
+    const host: HostConfig = {
+      ...baseHost,
+      locations: [
+        baseHost.locations[0],
+        { ...baseHost.locations[0], path: "/other", upstreams: [{ server: "10.0.0.2", port: 8080, weight: 1 }] },
+      ],
+    };
+    const before = buildServerBlock(host, ACCESS_LISTS);
+    const at = before.indexOf("    location /api {");
+    expect(at).toBeGreaterThan(0);
+    const after = before.slice(0, at) + "}\n"; // drops both real locations at once
+
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
     expect(c.edits.filter((e) => e.kind === "location-removed" || e.kind === "location-added")).toEqual([]);
     expect(c.refusals[0].reason).toBe(
       "Two or more locations changed at once and cannot be matched to model entries"
@@ -568,19 +412,7 @@ server {
   // ── Unmappable removals must refuse, not silently revert (see NUANCES.md #16) ──
 
   it("refuses removing client_max_body_size at server scope", () => {
-    const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`),
-      baseHost
-    );
+    const c = classifyDelta(deltaFor(edited("\n    client_max_body_size 10m;\n", "")), baseHost);
     expect(c.edits).toEqual([]);
     expect(c.refusals).toHaveLength(1);
     expect(c.refusals[0].directive).toBe("client_max_body_size");
@@ -590,16 +422,7 @@ server {
 
   it("refuses removing a single proxy_set_header inside a matched location", () => {
     const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-    }
-}
-`),
+      deltaFor(edited("        proxy_set_header X-Forwarded-Proto $scheme;\n", "")),
       baseHost
     );
     expect(c.edits).toEqual([]);
@@ -623,87 +446,15 @@ ${BASE_SERVER}`;
     expect(c.refusals[0].reason).toMatch(/cannot be mapped back to a host field/);
   });
 
-  it("still turns a removed http2 on into http2:false with no refusal", () => {
-    const withHttp2 = `
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    http2 on;
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`;
-    const delta = diffAst(parse(withHttp2), parse(BASE_SERVER));
-    const c = classifyDelta(delta, { ...baseHost, http2: true });
-    expect(c.refusals).toEqual([]);
-    expect(c.edits).toContainEqual(
-      expect.objectContaining({ kind: "field", field: "http2", from: true, to: false })
-    );
-  });
 
-  it("still turns a removed force-https if block into sslForceHttps:false with no refusal", () => {
-    const withForceHttps = `
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    if ($scheme = http) {
-        return 301 https://$host$request_uri;
-    }
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`;
-    const delta = diffAst(parse(withForceHttps), parse(BASE_SERVER));
-    const c = classifyDelta(delta, { ...baseHost, sslForceHttps: true });
-    expect(c.refusals).toEqual([]);
-    expect(c.edits).toContainEqual(
-      expect.objectContaining({ kind: "field", field: "sslForceHttps", from: true, to: false })
-    );
-  });
 
-  it("still turns a removed www-redirect if block into redirectWww:false with no refusal", () => {
-    const withWwwRedirect = `
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-    if ($host ~ ^www\\.(.+)$) {
-        return 301 $scheme://example.com$request_uri;
-    }
-    location /api {
-        proxy_pass http://10.0.0.1:8080;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-`;
-    const delta = diffAst(parse(withWwwRedirect), parse(BASE_SERVER));
-    const c = classifyDelta(delta, { ...baseHost, redirectWww: true });
-    expect(c.refusals).toEqual([]);
-    expect(c.edits).toContainEqual(
-      expect.objectContaining({ kind: "field", field: "redirectWww", from: true, to: false })
-    );
-  });
 
   it("still removes a whole location block as location-removed with no refusal", () => {
-    const c = classifyDelta(
-      deltaFor(`
-server {
-    listen 80;
-    server_name example.com;
-    client_max_body_size 1m;
-}
-`),
-      baseHost
-    );
+    const c = classifyDelta(deltaFor(withoutApiLocation()), baseHost);
     expect(c.refusals).toEqual([]);
-    const removed = findEdit(c.edits, "location-removed");
-    expect(removed).toBeDefined();
+    expect(c.edits).toContainEqual(
+      expect.objectContaining({ kind: "location-removed", index: 0 })
+    );
   });
 });
 
@@ -1214,9 +965,9 @@ const sslBase: HostConfig = {
  * test into a parser-confusion test instead of a heuristics test.)
  */
 function removeRenderedFragmentFor(host: HostConfig, field: keyof HostConfig) {
-  const original = buildServerBlock(host, new Map());
+  const original = buildServerBlock(host, ACCESS_LISTS);
   const on = original.split("\n");
-  const off = buildServerBlock({ ...host, [field]: false }, new Map()).split("\n");
+  const off = buildServerBlock({ ...host, [field]: false }, ACCESS_LISTS).split("\n");
 
   let head = 0;
   while (head < off.length && on[head] === off[head]) head++;
@@ -1253,7 +1004,7 @@ describe("flag removals against real parser output", () => {
   );
   it("still refuses a lone gzip_vary removal, with gzip on left in place", () => {
     const host = { ...sslBase, compression: true };
-    const original = buildServerBlock(host, new Map());
+    const original = buildServerBlock(host, ACCESS_LISTS);
     const edited = original
       .split("\n")
       .filter((l) => !l.includes("gzip_vary"))
@@ -1266,12 +1017,8 @@ describe("flag removals against real parser output", () => {
   });
 });
 
-// The fixtures above diff against the hand-written BASE_SERVER constant, which
-// contains `proxy_set_header X-Real-IP $remote_addr;` and no `add_header` at
-// all — even though baseHost.headers is non-empty. That fixture was written to
-// match the classifier rather than the generator, and that divergence is
-// exactly why the header direction bug survived the suite (NUANCES §49).
-// These cases diff against real generator output instead.
+// Response-header cases, on a host stripped of the access-list and basic-auth
+// noise so the header lines are the only thing in the location body that moves.
 const HEADER_HOST: HostConfig = {
   ...baseHost,
   locations: [{ ...baseHost.locations[0], accessListId: null, basicAuth: null }],
