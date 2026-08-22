@@ -110,4 +110,22 @@ describe("hashBasicAuthPasswords", () => {
     expect(mockHash).not.toHaveBeenCalled();
     expect(result.locations[0]).toBe(loc);
   });
+
+  // The host form's save payload runs every location through this helper, so
+  // it is the one server-side chokepoint where an unknown-to-the-form field
+  // could be stripped. An "advanced" location carries a raw body that no
+  // typed field can express; losing it silently rewrites the user's nginx.
+  it("passes an advanced location through byte-identically", async () => {
+    const advanced = {
+      path: "/raw",
+      matchType: "prefix",
+      type: "advanced",
+      advanced: "  proxy_pass http://10.0.0.9:8080;\n  add_header X-Hand 1;",
+      upstreams: [],
+      basicAuth: null,
+    } as any;
+    const r = await hashBasicAuthPasswords(null, [advanced]);
+    expect(r.locations[0]).toEqual(advanced);
+    expect((r.locations[0] as any).advanced).toBe(advanced.advanced);
+  });
 });

@@ -20,7 +20,13 @@ import { LABEL_COLORS, type LabelItem } from "~/components/LabelsModal";
 export interface LocationFormData {
   path: string;
   matchType: "prefix" | "exact" | "regex";
-  type: "proxy" | "static" | "redirect" | "file";
+  type: "proxy" | "static" | "redirect" | "file" | "advanced";
+  /**
+   * Raw location body, meaningful only when `type === "advanced"`. Such a
+   * location is never created from the form — it is read back from a hand
+   * edit that the typed proxy/static/redirect shape cannot express.
+   */
+  advanced?: string;
   upstreams: Array<{ server: string; port: number; weight: number; protocol: "http" | "https" | "grpc" | "grpcs" | "fastcgi" }>;
   balanceMethod: string;
   staticDir: string;

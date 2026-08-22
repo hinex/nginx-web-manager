@@ -3,6 +3,7 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
+import { Textarea } from "~/components/ui/textarea";
 import { Plus, Trash2, ChevronDown, ChevronUp, Zap, Loader2 } from "lucide-react";
 import { defaultLocation, type LocationFormData } from "./HostForm";
 
@@ -140,6 +141,13 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
         return loc.forwardDomain
           ? `\u2192 ${loc.forwardScheme}://${loc.forwardDomain}${loc.forwardPath}`
           : "No target set";
+      case "advanced":
+        return "Custom (raw nginx)";
+      // A missing arm used to render an empty summary, hiding the location
+      // entirely. Keep a neutral fallback so a future union member degrades
+      // visibly instead of silently.
+      default:
+        return "Unknown location type";
     }
   };
 
@@ -233,9 +241,34 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                         <option value="static">Static</option>
                         <option value="file">File</option>
                         <option value="redirect">Redirect</option>
+                        {/* Present so an advanced location displays its own
+                            type instead of falling back to the first option,
+                            but disabled: a normal location must not be turned
+                            into a raw one from here. */}
+                        <option value="advanced" disabled>
+                          Advanced (raw nginx)
+                        </option>
                       </select>
                     </div>
                   </div>
+
+                  {/* Type-specific section: Advanced (raw, read-only here) */}
+                  {location.type === "advanced" && (
+                    <div>
+                      <Label className="text-xs mb-1">Raw location body</Label>
+                      <Textarea
+                        value={location.advanced ?? ""}
+                        readOnly
+                        rows={8}
+                        className="font-mono text-sm"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        This block was written by hand and cannot be expressed by the typed
+                        fields. Edit it through the config editor; saving the form here keeps it
+                        byte-identical.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Type-specific section: Proxy */}
                   {location.type === "proxy" && (
