@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The refusal still stands when a location is **removed** in the same save, alone or alongside
   additions: two removed locations sharing a path and match type resolve to the same model
   entry, so a deletion is only applied when it is the single structural change.
+- A hand-added `proxy_set_header` of your own now lands in the location's advanced directives
+  instead of being refused. Only the six names the template always emits (`Host`, `X-Real-IP`,
+  `X-Forwarded-For`, `X-Forwarded-Proto`, `Upgrade`, `Connection`) are still refused, because
+  advanced text is written after the generated block and nginx appends a repeated header rather
+  than replacing it — the backend would receive both values. The refusal now says that instead
+  of advising it.
+- An edited advanced directive replaces its old line instead of being appended next to it.
+  Changing `proxy_read_timeout 30s;` to `1h;` previously saved both lines: the edit was reported
+  as applied, the file came back with the old value still present, and nginx used whichever came
+  last.
+- Editing a generated line that has no model field and no advanced entry to rewrite is now
+  refused rather than duplicated — for example `proxy_http_version` or a `gzip_*` companion.
 
 ## [1.2.1] - 2026-08-23
 
