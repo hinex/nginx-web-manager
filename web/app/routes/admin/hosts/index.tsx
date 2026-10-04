@@ -451,18 +451,8 @@ function AllHostsTable({
 
       {/* Desktop: table */}
       <div className="hidden md:block rounded-md border overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Type</TableHead>
-              <TableHead>Domains</TableHead>
-              <TableHead className="hidden lg:table-cell">Labels</TableHead>
-              <TableHead className="hidden sm:table-cell">Info</TableHead>
-              <TableHead>SSL</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-[70px]">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
+        <Table className="table-fixed min-w-[760px]">
+          <HostTableHeader />
           <TableBody>
             {hostsList.map((host) => (
               <HostRow key={host.id} host={host} groupMap={groupMap} />
@@ -541,18 +531,8 @@ function GroupedHostsView({
 
           {/* Desktop: table */}
           <div className="hidden md:block rounded-md border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Domains</TableHead>
-                  <TableHead className="hidden lg:table-cell">Labels</TableHead>
-                  <TableHead className="hidden sm:table-cell">Info</TableHead>
-                  <TableHead>SSL</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-[70px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+            <Table className="table-fixed min-w-[760px]">
+              <HostTableHeader />
               <TableBody>
                 {section.hosts.map((host) => (
                   <HostRow key={host.id} host={host} groupMap={groupMap} />
@@ -779,10 +759,10 @@ function HostRow({
 
       {/* Domains */}
       <TableCell>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 min-w-0">
           {domains.slice(0, 3).map((d, i) => (
-            <Badge key={i} variant="secondary">
-              {d}
+            <Badge key={i} variant="secondary" className="max-w-full min-w-0" title={d}>
+              <span className="truncate">{d}</span>
             </Badge>
           ))}
           {domains.length > 3 && (
@@ -812,7 +792,9 @@ function HostRow({
 
       {/* Type-specific info */}
       <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
-        {typeInfo}
+        <div className="truncate" title={typeof typeInfo === "string" ? typeInfo : undefined}>
+          {typeInfo}
+        </div>
       </TableCell>
 
       {/* SSL */}
@@ -834,6 +816,27 @@ function HostRow({
         <HostActions host={host} />
       </TableCell>
     </TableRow>
+  );
+}
+
+// ─── Host Table Header ─────────────────────────────────────
+// One header for the flat and the grouped view. Every grouped section is its own
+// <table>, so widths must be fixed (table-fixed) or each section sizes its columns
+// to its own content and the columns jump between groups. Domains takes the rest.
+
+function HostTableHeader() {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead className="w-[100px]">Type</TableHead>
+        <TableHead>Domains</TableHead>
+        <TableHead className="hidden lg:table-cell w-[160px]">Labels</TableHead>
+        <TableHead className="hidden sm:table-cell w-[28%]">Info</TableHead>
+        <TableHead className="w-[130px]">SSL</TableHead>
+        <TableHead className="w-[100px]">Status</TableHead>
+        <TableHead className="w-[70px]">Actions</TableHead>
+      </TableRow>
+    </TableHeader>
   );
 }
 
