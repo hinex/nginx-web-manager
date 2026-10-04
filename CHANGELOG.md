@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-04
+
+### Added
+
+- **Duplicate** in the host menu copies a host with all its settings and labels — locations,
+  upstreams, headers, advanced directives, basic auth, access list, group — and opens the copy
+  in Edit. The copy is created disabled, so it stays out of the nginx config and its domains do
+  not conflict with the original's until you change them and publish.
+- The copy has no SSL: the certificate belongs to the original's domains, so the copy starts
+  with SSL set to none and empty certificate and key paths, in the host and in its unpublished
+  draft alike. Choose SSL again before publishing. Force HTTPS, HSTS and HTTP/2 are kept; they
+  only apply once a certificate is set.
+- Basic auth passwords are copied as stored hashes, so they keep working on the copy without
+  being retyped. Health-check history is not copied.
+- A banner on the copy's Edit page names the source host. Publishing keeps the Enabled switch
+  as it is in the form, and on a copy it is off: switch it on to publish the copy live.
+
+### Fixed
+
+- Host table columns no longer shift between groups. Each group was its own table sized to its
+  own content; all tables now share one header with fixed column widths, and long domains and
+  location info are truncated with the full text on hover.
+
 ## [1.2.2] - 2026-08-23
 
 ### Fixed
@@ -197,6 +220,7 @@ that publishes managed host configs before upgrading.
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.3.0]: https://github.com/hardskilled/nginx-manager/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/hardskilled/nginx-manager/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/hardskilled/nginx-manager/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/hardskilled/nginx-manager/compare/v1.1.1...v1.2.0
