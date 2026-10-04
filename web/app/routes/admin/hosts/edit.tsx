@@ -19,7 +19,7 @@ export function meta() {
   return [{ title: "Edit Host — Nginx Manager" }];
 }
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
   const id = Number(params.id);
   const host = db.select().from(hosts).where(eq(hosts.id, id)).get();
 
@@ -36,8 +36,15 @@ export async function loader({ params }: Route.LoaderArgs) {
     .where(eq(hostLabelAssignments.hostId, id))
     .all();
 
+  // Set by the hosts list's Duplicate action. Only read for the banner below.
+  const duplicatedFromId = Number(new URL(request.url).searchParams.get("duplicatedFrom"));
+  const duplicatedFrom = duplicatedFromId
+    ? db.select({ id: hosts.id, domains: hosts.domains }).from(hosts).where(eq(hosts.id, duplicatedFromId)).get() ?? null
+    : null;
+
   return {
     host,
+    duplicatedFrom,
     groups,
     labels,
     accessLists: allAccessLists,
@@ -230,7 +237,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function EditHost({ loaderData }: Route.ComponentProps) {
-  const { host, groups, labels, accessLists: allAccessLists, assignedLabelIds } = loaderData;
+  const { host, groups, labels, accessLists: allAccessLists, assignedLabelIds, duplicatedFrom } = loaderData;
 
   const hasDraft = (host as any).draft != null;
   const draftData = (host as any).draft as Record<string, any> | null;
@@ -286,6 +293,12 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
         description="Update proxy host configuration"
         backHref="/admin/hosts"
       />
+      {duplicatedFrom && !host.enabled && (
+        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+          This is a copy of <strong>{(duplicatedFrom.domains as string[])[0] ?? `host #${duplicatedFrom.id}`}</strong>.
+          It is disabled and not in the nginx config. Change the domains, choose SSL, switch Enabled on and publish.
+        </div>
+      )}
       <HostForm
         initialData={hasDraft ? draftInitialData! : publishedData}
         publishedData={publishedData}

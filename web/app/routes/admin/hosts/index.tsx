@@ -1,5 +1,5 @@
 import type { Route } from "./+types/index";
-import { Link, useFetcher } from "react-router";
+import { Link, redirect, useFetcher } from "react-router";
 import { db } from "~/lib/db/connection";
 import { hosts, hostGroups, hostLabels, hostLabelAssignments } from "~/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
@@ -9,6 +9,7 @@ import { getSessionUser } from "~/lib/auth/session.server";
 import { requireEditor } from "~/lib/auth/middleware";
 import { generateAllConfigs } from "~/lib/nginx/generator";
 import { reloadNginx } from "~/lib/nginx/reload";
+import { duplicateHost } from "~/lib/hosts/duplicate";
 import Fuse from "fuse.js";
 import { PageHeader } from "~/components/PageHeader";
 import { GroupsModal, type GroupItem } from "~/components/GroupsModal";
@@ -53,6 +54,7 @@ import {
   List,
   Tags,
   Settings2,
+  Copy,
 } from "lucide-react";
 
 export function meta() {
@@ -135,6 +137,21 @@ export async function action({ request }: Route.ActionArgs) {
     });
     generateAllConfigs();
     reloadNginx();
+  } else if (intent === "duplicate") {
+    // The copy is disabled, so it is outside the nginx config: no regenerate, no reload.
+    const sourceId = Number(formData.get("id"));
+    const source = db.select({ id: hosts.id }).from(hosts).where(eq(hosts.id, sourceId)).get();
+    if (!source) return { error: "Host not found" };
+    const newId = duplicateHost(db, sourceId);
+    logAudit({
+      userId: user?.userId ?? null,
+      action: "create",
+      entity: "host",
+      entityId: newId,
+      details: { duplicatedFrom: sourceId },
+      ipAddress,
+    });
+    return redirect(`/admin/hosts/${newId}/edit?duplicatedFrom=${sourceId}`);
   }
 
   // ── Group actions ─────────────────────────────────────────
@@ -554,11 +571,19 @@ function GroupedHostsView({
 function HostActions({ host }: { host: HostWithLabels }) {
   const toggleFetcher = useFetcher();
   const deleteFetcher = useFetcher();
+  const duplicateFetcher = useFetcher();
   const [alertOpen, setAlertOpen] = useState(false);
 
   const handleToggle = () => {
     toggleFetcher.submit(
       { intent: "toggle", id: String(host.id) },
+      { method: "post" }
+    );
+  };
+
+  const handleDuplicate = () => {
+    duplicateFetcher.submit(
+      { intent: "duplicate", id: String(host.id) },
       { method: "post" }
     );
   };
@@ -593,6 +618,13 @@ function HostActions({ host }: { host: HostWithLabels }) {
           >
             <Power className="mr-2 h-4 w-4" />
             {host.enabled ? "Disable" : "Enable"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={handleDuplicate}
+            disabled={duplicateFetcher.state !== "idle"}
+          >
+            <Copy className="mr-2 h-4 w-4" />
+            Duplicate
           </DropdownMenuItem>
           <AlertDialogTrigger asChild>
             <DropdownMenuItem
