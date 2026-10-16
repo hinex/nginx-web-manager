@@ -93,6 +93,16 @@ const MATRIX: Array<[string, HostConfig]> = [
       ],
     },
   ],
+  [
+    "file location with a variable path",
+    {
+      ...baseHost,
+      locations: [
+        baseLocation,
+        { ...baseLocation, path: "/logo.svg", matchType: "exact", type: "file", staticDir: "/var/static/service/$host/logo.svg", cacheExpires: "7d" },
+      ],
+    },
+  ],
 ];
 
 /**

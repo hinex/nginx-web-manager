@@ -323,6 +323,22 @@ export function buildServerBlock(
         serverLines.push("        try_files $uri $uri/ =404;");
         break;
       }
+      case "file": {
+        // A single file served at this location. `alias` to a file path
+        // replaces the whole URI, so no try_files: a missing file is a 404
+        // on its own. Variables ($host, ...) are allowed - with a variable
+        // in it, nginx uses the alias value as the complete path.
+        if (loc.staticDir) {
+          serverLines.push(`        alias ${loc.staticDir};`);
+        }
+        if (loc.cacheExpires) {
+          serverLines.push(`        expires ${loc.cacheExpires};`);
+          serverLines.push(
+            '        add_header Cache-Control "public, no-transform";'
+          );
+        }
+        break;
+      }
       case "redirect": {
         const scheme = loc.forwardScheme || "https";
         const domain = loc.forwardDomain || "$host";

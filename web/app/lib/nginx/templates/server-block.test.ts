@@ -169,3 +169,14 @@ describe("buildServerBlock — raw escape hatches", () => {
     expect(out).not.toContain("allow ");
   });
 });
+
+describe("file location", () => {
+  it("serves the configured file", () => {
+    const out = buildServerBlock(
+      makeHost({ locations: [makeLocation({ path: "/logo.svg", matchType: "exact", type: "file", upstreams: [], staticDir: "/var/static/service/$host/logo.svg" })] }),
+      new Map(),
+    );
+    const block = out.slice(out.indexOf("location = /logo.svg"));
+    expect(block.slice(0, block.indexOf("}"))).toContain("/var/static/service/$host/logo.svg");
+  });
+});
