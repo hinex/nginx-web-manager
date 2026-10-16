@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-17
+
+### Added
+
+- A host's Edit page links to its generated config files (`host-N.conf`, and `host-N-stream.conf`
+  for stream ports) in the Config Editor, and the Config Editor shows an **Open host** button
+  for a file that belongs to a host. Drafts and disabled hosts have no generated file, so the
+  link is not shown for them.
+
+### Fixed
+
+- File locations were rendered as an empty `location` block: the file path and cache expiry
+  saved but never reached nginx. They now render as `alias` (with `expires` when set), so a
+  path with variables such as `/var/static/service/$host/logo.svg` works per domain.
+- Upstream weight is rendered under every balance method. It used to reach nginx only with the
+  Weighted method, so a weight under Round Robin, Least Connections or IP Hash was silently
+  dropped — including one pasted into a config file. Applies to locations and stream ports.
+- An added location whose body was also kept as advanced text is stored as an advanced
+  location, so its directives are no longer emitted twice and `nginx -t` no longer rejects it.
+- Advanced (raw) locations no longer show Response Headers, Basic Auth and Access List: the
+  generator emits only the raw body for them, so those controls had no effect.
+
 ## [1.3.0] - 2026-10-04
 
 ### Added
@@ -220,6 +242,7 @@ that publishes managed host configs before upgrading.
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.4.0]: https://github.com/hardskilled/nginx-manager/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/hardskilled/nginx-manager/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/hardskilled/nginx-manager/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/hardskilled/nginx-manager/compare/v1.2.0...v1.2.1
