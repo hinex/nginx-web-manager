@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useSearchParams, Link } from "react-router";
+import { db } from "~/lib/db/connection";
+import { hosts } from "~/lib/db/schema";
+import { hostIdFromConfigPath } from "~/lib/hosts/config-link";
 import type { Route } from "./+types/configs";
 import { requireEditor } from "~/lib/auth/middleware";
 import { listConfigFiles } from "~/lib/nginx/parser";
@@ -17,7 +20,7 @@ import {
   AlertDialogCancel,
 } from "~/components/ui/alert-dialog";
 import {
-  File, Folder, FolderOpen, Code, Blocks, Save, History, RotateCcw, X, Menu,
+  File, Folder, FolderOpen, Code, Blocks, Save, History, RotateCcw, X, Menu, ExternalLink,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { toast } from "sonner";
@@ -45,7 +48,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   // — and everything `~/lib/services/configs` pulls in to make it — never
   // reaches the client bundle. See the import comment above.
   const generatedFiles = files.filter((f) => isGeneratedSystemFile(f));
-  return { files, baseDir: nginxDir(), generatedFiles };
+  // file path -> host id, only for files whose host still exists, so the
+  // "Open host" link never points at a deleted host's leftover file.
+  const hostIds = new Set(db.select({ id: hosts.id }).from(hosts).all().map((h) => h.id));
+  const hostFiles: Record<string, number> = {};
+  for (const f of files) {
+    const id = hostIdFromConfigPath(f);
+    if (id !== null && hostIds.has(id)) hostFiles[f] = id;
+  }
+  return { files, baseDir: nginxDir(), generatedFiles, hostFiles };
 }
 
 // ── Types ────────────────────────────────────────────────
@@ -94,7 +105,9 @@ const CHANGE_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function ConfigsPage() {
-  const { files, baseDir, generatedFiles } = useLoaderData<typeof loader>();
+  const { files, baseDir, generatedFiles, hostFiles } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
+  const fileParam = searchParams.get("file");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [content, setContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
@@ -394,6 +407,15 @@ export default function ConfigsPage() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Deep link from a host page: /admin/configs?file=<path>. Only paths the
+  // loader listed are honoured.
+  useEffect(() => {
+    if (fileParam && fileParam !== selectedFile && files.includes(fileParam)) loadFile(fileParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileParam]);
+
+  const linkedHostId = selectedFile ? hostFiles[selectedFile] : undefined;
+
   // Auto-close sidebar on mobile after file selection
   const handleFileSelect = useCallback((filePath: string) => {
     loadFile(filePath);
@@ -450,6 +472,14 @@ export default function ConfigsPage() {
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {linkedHostId !== undefined && (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to={`/admin/hosts/${linkedHostId}/edit`}>
+                      <ExternalLink className="h-3.5 w-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">Open host</span>
+                    </Link>
+                  </Button>
+                )}
                 <Tabs value={editorMode} onValueChange={(v) => setEditorMode(v as "code" | "block")}>
                   <TabsList className="h-8">
                     <TabsTrigger value="code" className="text-xs gap-1 px-2">

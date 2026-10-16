@@ -1,5 +1,5 @@
 import type { Route } from "./+types/edit";
-import { redirect } from "react-router";
+import { redirect, Link } from "react-router";
 import { db } from "~/lib/db/connection";
 import { hosts, hostGroups, hostLabels, hostLabelAssignments, accessLists } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -14,6 +14,12 @@ import { hashBasicAuthPasswords } from "~/lib/auth/hash-basic-auth";
 import { nullableHostFields, clientMaxBodySizeOf } from "~/lib/hosts/publish-fields";
 import { validatePublishData } from "~/lib/hosts/validate";
 import { restoreSnapshot } from "~/lib/services/hosts";
+import { hostConfDir, streamConfDir } from "~/lib/paths";
+import { hostConfigFileNames } from "~/lib/hosts/config-link";
+import { existsSync } from "fs";
+import { join } from "path";
+import { Button } from "~/components/ui/button";
+import { FileCode } from "lucide-react";
 
 export function meta() {
   return [{ title: "Edit Host — Nginx Manager" }];
@@ -42,8 +48,15 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     ? db.select({ id: hosts.id, domains: hosts.domains }).from(hosts).where(eq(hosts.id, duplicatedFromId)).get() ?? null
     : null;
 
+  // Generated files that exist on disk right now. A draft or disabled host
+  // has none, so there is nothing to link to.
+  const [httpName, streamName] = hostConfigFileNames(id);
+  const configFiles = [join(hostConfDir(), httpName), join(streamConfDir(), streamName)]
+    .filter((f) => existsSync(f));
+
   return {
     host,
+    configFiles,
     duplicatedFrom,
     groups,
     labels,
@@ -237,7 +250,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function EditHost({ loaderData }: Route.ComponentProps) {
-  const { host, groups, labels, accessLists: allAccessLists, assignedLabelIds, duplicatedFrom } = loaderData;
+  const { host, groups, labels, accessLists: allAccessLists, assignedLabelIds, duplicatedFrom, configFiles } = loaderData;
 
   const hasDraft = (host as any).draft != null;
   const draftData = (host as any).draft as Record<string, any> | null;
@@ -292,6 +305,18 @@ export default function EditHost({ loaderData }: Route.ComponentProps) {
         title="Edit Host"
         description="Update proxy host configuration"
         backHref="/admin/hosts"
+        actions={configFiles.length > 0 ? (
+          <div className="flex gap-2">
+            {configFiles.map((f) => (
+              <Button key={f} variant="outline" size="sm" asChild>
+                <Link to={`/admin/configs?file=${encodeURIComponent(f)}`}>
+                  <FileCode className="h-4 w-4 mr-1" />
+                  {f.endsWith("-stream.conf") ? "Open stream config" : "Open config"}
+                </Link>
+              </Button>
+            ))}
+          </div>
+        ) : undefined}
       />
       {duplicatedFrom && !host.enabled && (
         <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
