@@ -34,6 +34,7 @@ import { ApplyDialog } from "~/components/config-editor/ApplyDialog";
 // documented for the parser barrel in the model-highlight work.
 import { isGeneratedSystemFile, type ConfigEditPreview } from "~/lib/services/configs";
 import type { Refusal } from "~/lib/nginx/reverse/classify";
+import { lintConfig, type ConfigWarning } from "~/lib/nginx/lint";
 import { nginxDir } from "~/lib/paths";
 
 
@@ -131,6 +132,7 @@ export default function ConfigsPage() {
   // Reverse-sync confirmation dialog state (config editor → host model)
   const [applyDialogOpen, setApplyDialogOpen] = useState(false);
   const [preview, setPreview] = useState<ConfigEditPreview | null>(null);
+  const [warnings, setWarnings] = useState<ConfigWarning[]>([]);
 
   // Fetch version history for the current file
   const fetchVersions = useCallback(async (filePath: string) => {
@@ -221,9 +223,13 @@ export default function ConfigsPage() {
   // Save is never silent: it always previews the classification first. A
   // managed host-<id>.conf shows the ApplyDialog so the user confirms what
   // was understood before anything is written; a file with nothing to
-  // classify (hostId === null) has no diff to show, so it saves directly.
+  // classify (hostId === null) has no diff to show, so it saves directly —
+  // unless lint found something, in which case the same dialog shows the
+  // warnings first. Warnings never block: Apply stays available.
   const handleSave = useCallback(async () => {
     if (!selectedFile || !dirty) return;
+    const found = lintConfig(content);
+    setWarnings(found);
     const res = await fetch("/api/config-file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -238,7 +244,7 @@ export default function ConfigsPage() {
       return;
     }
     const data: ConfigEditPreview = await res.json();
-    if (data.hostId === null) {
+    if (data.hostId === null && found.length === 0) {
       await writeConfigFile();
       return;
     }
@@ -607,6 +613,7 @@ export default function ConfigsPage() {
         open={applyDialogOpen}
         preview={preview}
         generatedWarning={generatedWarning}
+        warnings={warnings}
         onApply={handleApplyConfirm}
         onCancel={handleCancelApply}
         onJumpToLine={handleJumpToLine}

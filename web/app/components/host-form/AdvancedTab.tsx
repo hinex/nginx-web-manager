@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
+import { RawNginxWarnings } from "~/components/config-warnings";
 import { Button } from "~/components/ui/button";
 import { Separator } from "~/components/ui/separator";
 import { Plus, Trash2, Zap, Loader2 } from "lucide-react";
@@ -332,6 +333,7 @@ export function AdvancedTab({
         <p className="text-xs text-muted-foreground mt-1">
           Optional advanced configuration for custom Nginx directives
         </p>
+        <RawNginxWarnings text={advancedNginx} />
       </div>
 
       <div>

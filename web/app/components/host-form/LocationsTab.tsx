@@ -4,6 +4,7 @@ import { Label } from "~/components/ui/label";
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
 import { Textarea } from "~/components/ui/textarea";
+import { RawNginxWarnings } from "~/components/config-warnings";
 import { Plus, Trash2, ChevronDown, ChevronUp, Zap, Loader2 } from "lucide-react";
 import { defaultLocation, type LocationFormData } from "./HostForm";
 
@@ -267,6 +268,7 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                         nginx, inserted verbatim into this location's block and validated by{" "}
                         <code>nginx -t</code> on save.
                       </p>
+                      <RawNginxWarnings text={location.advanced ?? ""} />
                     </div>
                   )}
 
