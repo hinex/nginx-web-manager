@@ -104,21 +104,19 @@ function findLocationIndex(host: HostConfig, scope: string): number {
 }
 
 /**
- * Core-detection for an added location block, per design record: proxy_pass
- * → proxy; alias/root → static; return with a 3xx first arg → redirect;
- * otherwise → advanced (whole body kept as raw text).
+ * The body of an added location block, rendered without comments.
+ *
+ * An added location is always stored as type `advanced`: its body is kept
+ * verbatim, and only `advanced` makes the generator emit that body and nothing
+ * else. Typing it proxy/static/redirect (the original design record) made the
+ * generator add that type's own core on top of the verbatim body — a duplicate
+ * `try_files` that failed `nginx -t`, or a `return` shadowing the user's one.
+ * See NUANCES §62.
  */
-export function detectLocationCore(blockText: string): { type: string; body: string } {
+export function addedLocationBody(blockText: string): string {
   const parsed = parseAst(blockText);
-  const loc = parsed.directives[0];
-  const inner = loc?.block?.directives ?? [];
-  const body = render({ directives: inner.map((d) => ({ ...d, comments: undefined })) }).trim();
-
-  if (inner.some((d) => d.name === "proxy_pass")) return { type: "proxy", body };
-  if (inner.some((d) => d.name === "alias" || d.name === "root")) return { type: "static", body };
-  const ret = inner.find((d) => d.name === "return");
-  if (ret && /^3\d\d$/.test(ret.args[0] ?? "")) return { type: "redirect", body };
-  return { type: "advanced", body };
+  const inner = parsed.directives[0]?.block?.directives ?? [];
+  return render({ directives: inner.map((d) => ({ ...d, comments: undefined })) }).trim();
 }
 
 // ── Refusal predicates (design record §refusals 1-4) ──
@@ -456,14 +454,13 @@ function locationRemovedEdit(ref: DirectiveRef, host: HostConfig): ClassifiedEdi
 function locationAddedEdit(ref: DirectiveRef): ClassifiedEdit {
   const scope = refIdentityKey(ref);
   const { path, matchType } = parseLocationScope(scope);
-  const { type, body } = detectLocationCore(ref.text);
   return {
     kind: "location-added",
     path,
     matchType,
-    type,
-    body,
-    label: `location ${path} → new ${type} location`,
+    type: "advanced",
+    body: addedLocationBody(ref.text),
+    label: `location ${path} → new advanced location`,
   };
 }
 

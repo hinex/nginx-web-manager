@@ -235,7 +235,8 @@ describe("classifyDelta", () => {
     );
   });
 
-  it("classifies a new location with proxy_pass as a proxy location", () => {
+  // Kept verbatim, so typed advanced even with a recognisable core (§62).
+  it("classifies a new location with proxy_pass as advanced, body verbatim", () => {
     const c = classifyDelta(
       deltaFor(appended("location /new {\n        proxy_pass http://10.0.0.9:9999;\n    }")),
       baseHost
@@ -246,7 +247,8 @@ describe("classifyDelta", () => {
         kind: "location-added",
         path: "/new",
         matchType: "prefix",
-        type: "proxy",
+        type: "advanced",
+        body: "proxy_pass http://10.0.0.9:9999;",
       })
     );
   });
@@ -459,11 +461,41 @@ describe("classifyDelta", () => {
     expect(c.refusals).toEqual([]);
     const added = c.edits.filter((e) => e.kind === "location-added");
     expect(added.map((e) => (e as { path: string }).path)).toEqual(["/assets/", "/images/", "/static/"]);
-    expect(added.every((e) => (e as { type: string }).type === "static")).toBe(true);
+    expect(added.every((e) => (e as { type: string }).type === "advanced")).toBe(true);
 
     // The edits must survive apply, not merely classify.
     const next = applyEdits(baseHost, c.edits);
     expect(next.locations).toHaveLength(baseHost.locations.length + 3);
+  });
+
+  /**
+   * An added location's body is stored verbatim, so regenerating the host must
+   * give back exactly what was pasted. Typing it static/redirect/proxy made the
+   * generator emit that type's own core on top of the verbatim body — a static
+   * location gained a second `try_files` and failed `nginx -t`, a redirect
+   * gained a `return` that shadowed the user's one (§62).
+   */
+  it.each([
+    [
+      "static with its own try_files",
+      "location /assets/ {\n        root /var/static/prod-frontend-dist;\n        try_files $uri @frontend;\n        access_log off;\n        expires 1y;\n        add_header Cache-Control \"public, max-age=31536000, immutable\" always;\n    }",
+    ],
+    ["static without try_files", "location /files/ {\n        alias /srv/files/;\n    }"],
+    ["redirect", "location /old {\n        return 302 https://example.org/new;\n    }"],
+    [
+      "proxy",
+      "location /analytics/ {\n        proxy_pass http://rubbit-backend:3001/api/;\n        proxy_set_header Host $host;\n    }",
+    ],
+  ])("regenerates an added %s location exactly as pasted", (_name, block) => {
+    const after = appended(block);
+    const c = classifyDelta(deltaFor(after), baseHost);
+    expect(c.refusals).toEqual([]);
+
+    const rebuilt = buildServerBlock(applyEdits(baseHost, c.edits), ACCESS_LISTS);
+    const drift = diffAst(parse(after), parse(rebuilt));
+    expect(drift.added).toEqual([]);
+    expect(drift.removed).toEqual([]);
+    expect(drift.changed).toEqual([]);
   });
 
   it("keeps refusing added locations when a location is also removed", () => {

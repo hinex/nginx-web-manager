@@ -132,13 +132,13 @@ describe("applyEdits", () => {
     expect(result.locations[0]).toEqual(baseHost.locations[1]);
   });
 
-  it("appends a location-added block with the right type", () => {
+  it("appends a location-added block as advanced with its body verbatim", () => {
     const edits: ClassifiedEdit[] = [
       {
         kind: "location-added",
         path: "/new",
         matchType: "prefix",
-        type: "redirect",
+        type: "advanced",
         body: "return 301 https://example.com/new;",
         label: "x",
       },
@@ -148,7 +148,7 @@ describe("applyEdits", () => {
     const added = result.locations[2];
     expect(added.path).toBe("/new");
     expect(added.matchType).toBe("prefix");
-    expect(added.type).toBe("redirect");
+    expect(added.type).toBe("advanced");
     expect(added.advanced).toBe("return 301 https://example.com/new;");
   });
 
