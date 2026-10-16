@@ -512,7 +512,9 @@ function auditFieldFor(edit: ClassifiedEdit): { field: string; from: unknown; to
     case "location-field":
       return { field: `locations[${edit.index}].${edit.field}`, from: edit.from, to: edit.to, source };
     case "location-advanced":
-      return { field: `locations[${edit.index}].advanced`, from: null, to: edit.text, source };
+      return edit.remove
+        ? { field: `locations[${edit.index}].advanced`, from: edit.text, to: null, source }
+        : { field: `locations[${edit.index}].advanced`, from: null, to: edit.text, source };
     case "location-removed":
       return { field: `locations[${edit.index}]`, from: edit.label, to: null, source };
     case "location-added":
@@ -525,7 +527,9 @@ function auditFieldFor(edit: ClassifiedEdit): { field: string; from: unknown; to
     case "prelude":
       return { field: "customPrelude", from: null, to: edit.text, source };
     case "server-advanced":
-      return { field: "advancedNginx", from: null, to: edit.text, source };
+      return edit.remove
+        ? { field: "advancedNginx", from: edit.text, to: null, source }
+        : { field: "advancedNginx", from: null, to: edit.text, source };
     case "stream-field":
       return { field: `streamPorts[${edit.index}].${edit.field}`, from: edit.from, to: edit.to, source };
   }

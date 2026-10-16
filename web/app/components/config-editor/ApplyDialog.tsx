@@ -30,15 +30,17 @@ const RAW_KINDS = new Set(["server-advanced", "location-advanced", "prelude"]);
 function groupEdits(edits: ClassifiedEdit[]) {
   const recognised: ClassifiedEdit[] = [];
   const raw: ClassifiedEdit[] = [];
+  const rawRemoved: ClassifiedEdit[] = [];
   const removed: LocationRemovedEdit[] = [];
   const added: LocationAddedEdit[] = [];
   for (const edit of edits) {
     if (RECOGNISED_KINDS.has(edit.kind)) recognised.push(edit);
+    else if (RAW_KINDS.has(edit.kind) && "remove" in edit && edit.remove) rawRemoved.push(edit);
     else if (RAW_KINDS.has(edit.kind)) raw.push(edit);
     else if (edit.kind === "location-removed") removed.push(edit);
     else if (edit.kind === "location-added") added.push(edit);
   }
-  return { recognised, raw, removed, added };
+  return { recognised, raw, rawRemoved, removed, added };
 }
 
 /**
@@ -62,6 +64,7 @@ export function ApplyDialog({
     !!groups &&
     (groups.recognised.length > 0 ||
       groups.raw.length > 0 ||
+      groups.rawRemoved.length > 0 ||
       groups.removed.length > 0 ||
       groups.added.length > 0);
 
@@ -127,6 +130,17 @@ export function ApplyDialog({
                 <h4 className="mb-1 font-medium text-foreground">Kept as raw</h4>
                 <ul className="list-disc space-y-0.5 pl-5 text-muted-foreground">
                   {groups!.raw.map((edit, i) => (
+                    <li key={i}>{edit.label}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {groups!.rawRemoved.length > 0 && (
+              <div>
+                <h4 className="mb-1 font-medium text-foreground">Removed raw lines</h4>
+                <ul className="list-disc space-y-0.5 pl-5 text-muted-foreground">
+                  {groups!.rawRemoved.map((edit, i) => (
                     <li key={i}>{edit.label}</li>
                   ))}
                 </ul>

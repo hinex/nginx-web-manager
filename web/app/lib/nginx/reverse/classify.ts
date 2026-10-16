@@ -13,13 +13,13 @@ export type ClassifiedEdit =
    * can rewrite that entry instead of appending beside it. Absent on a plain
    * addition, which appends. See NUANCES §61.
    */
-  | { kind: "location-advanced"; index: number; text: string; label: string; replaces?: string }
+  | { kind: "location-advanced"; index: number; text: string; label: string; replaces?: string; remove?: true }
   // NOTE: `type` is not in the plan's literal interface (design record line ~464)
   // but the core-detection algorithm it describes (proxy/static/redirect/advanced)
   // has nowhere else to land. Added here; see NUANCES.md #15.
   | { kind: "location-added"; path: string; matchType: string; type: string; body: string; label: string }
   | { kind: "location-removed"; index: number; label: string; losing: string[] }
-  | { kind: "server-advanced"; text: string; label: string; replaces?: string }
+  | { kind: "server-advanced"; text: string; label: string; replaces?: string; remove?: true }
   | { kind: "prelude"; text: string; label: string }
   // Task 8 (stream): streamPorts[] has no advanced/raw escape hatch in the
   // schema (unlike locations[].advanced / advancedNginx), so the stream
@@ -590,6 +590,8 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
       } else if (compressionRemoved && GZIP_COMPANIONS.has(d.name)) {
         // Same fragment as the `gzip on` removal above — already represented
         // by that single compression edit.
+      } else if (rawRemovalEdit(d, host)) {
+        edits.push(rawRemovalEdit(d, host)!);
       } else {
         // Any other unmatched removal at server scope has no raw-text
         // representation to remove from (advancedNginx is additive text) —
@@ -601,10 +603,13 @@ export function classifyDelta(delta: AstDelta, host: HostConfig): Classification
     }
     if (d.scope.length === 2 && d.scope[0] === "server") {
       // Removed directive inside a matched location that isn't the removal
-      // of the whole location block itself (that's handled above, §5) —
-      // no field-level "unset" representation exists yet. Refuse rather
-      // than silently drop the line. See NUANCES.md #16.
-      refusals.push({ line: d.line, directive: d.name, reason: REASON_UNMAPPABLE_REMOVAL });
+      // of the whole location block itself (that's handled above, §5). A line
+      // that is an entry of the location's raw `advanced` text is removed from
+      // it (NUANCES §66); anything else has no field-level "unset"
+      // representation — refuse rather than silently drop the line (#16).
+      const edit = rawRemovalEdit(d, host);
+      if (edit) edits.push(edit);
+      else refusals.push({ line: d.line, directive: d.name, reason: REASON_UNMAPPABLE_REMOVAL });
       consumedRemoved.add(d);
     }
   }
@@ -818,6 +823,34 @@ function advancedLineIndex(existing: string | null | undefined, line: string): n
   if (!existing) return -1;
   const want = line.trim();
   return existing.split("\n").findIndex((l) => l.trim() === want);
+}
+
+/**
+ * A deleted line that is itself an entry of raw advanced text — the server's
+ * `advancedNginx` or a location's `advanced` — is representable: drop that
+ * entry and the regenerated file loses exactly that line. Anything else
+ * (a generated line, a fragment of a multi-line raw block) returns null and
+ * stays a refusal. See NUANCES §66.
+ */
+function rawRemovalEdit(ref: DirectiveRef, host: HostConfig): ClassifiedEdit | null {
+  if (ref.scope.length === 1 && ref.scope[0] === "server") {
+    if (advancedLineIndex(host.advancedNginx, ref.text) < 0) return null;
+    return { kind: "server-advanced", text: ref.text, label: `${ref.name} removed from Advanced`, remove: true };
+  }
+  if (ref.scope.length === 2 && ref.scope[0] === "server") {
+    const index = findLocationIndex(host, ref.scope[1]);
+    if (index < 0) return null;
+    const loc = host.locations[index];
+    if (advancedLineIndex(loc.advanced, ref.text) < 0) return null;
+    return {
+      kind: "location-advanced",
+      index,
+      text: ref.text,
+      label: `${ref.name} removed from Advanced (location ${loc.path})`,
+      remove: true,
+    };
+  }
+  return null;
 }
 
 function classifyServerOrLocationEntry(

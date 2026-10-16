@@ -1582,12 +1582,52 @@ describe("advanced location lines stay in `advanced` (NUANCES §65)", () => {
     expect(roundTrip(after).regen).toBe(after);
   });
 
-  it("refuses deleting a line from the body rather than dropping it silently", () => {
-    // Removal from an advanced body is not mapped yet - a refusal is the
-    // truthful answer until it is. Edit the location's raw body in the form.
+  it("removes a deleted line from the location's raw body (NUANCES §66)", () => {
     const after = before.replace(/\n\s*expires 1y;/, "");
     expect(after).not.toBe(before);
-    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
-    expect(c.refusals.map((r) => r.directive)).toEqual(["expires"]);
+    const { c, regen } = roundTrip(after);
+    expect(c.edits).toEqual([
+      expect.objectContaining({ kind: "location-advanced", index: 0, text: "expires 1y;", remove: true }),
+    ]);
+    expect(regen).toBe(after);
+  });
+
+  it("removes several deleted lines from different advanced locations at once", () => {
+    const after = before
+      .replace(/\n\s*access_log off;/, "")
+      .replace(/\n\s*proxy_set_header Host \$host;/, "");
+    expect(roundTrip(after).regen).toBe(after);
+  });
+
+  it("removes a deleted line from the server's Advanced text", () => {
+    const h: HostConfig = { ...host, advancedNginx: "server_tokens off;\nproxy_read_timeout 30s;" };
+    const b = buildServerBlock(h, ACCESS_LISTS);
+    const after = b.replace(/\n\s*server_tokens off;/, "");
+    expect(after).not.toBe(b);
+    const c = classifyDelta(diffAst(parse(b), parse(after)), h);
+    expect(c.refusals).toEqual([]);
+    expect(buildServerBlock(applyEdits(h, c.edits), ACCESS_LISTS)).toBe(after);
+  });
+
+  it("refuses deleting a whole nested block rather than removing only its header", () => {
+    const h: HostConfig = {
+      ...host,
+      locations: [advancedLoc("/x/", ["root /srv/x;", "if ($arg_a) {", "    return 404;", "}"])],
+    };
+    const b = buildServerBlock(h, ACCESS_LISTS);
+    const after = b.replace(/\n\s*if \(\$arg_a\) \{\n\s*return 404;\n\s*\}/, "");
+    expect(after).not.toBe(b);
+    const c = classifyDelta(diffAst(parse(b), parse(after)), h);
+    expect(c.edits).toEqual([]);
+    expect(c.refusals.map((r) => r.directive)).toEqual(["if"]);
+  });
+
+  it("still refuses deleting a generated line that has no raw entry to remove", () => {
+    const h: HostConfig = { ...host, clientMaxBodySize: "10m" };
+    const b = buildServerBlock(h, ACCESS_LISTS);
+    const after = b.replace(/\n\s*client_max_body_size 10m;/, "");
+    expect(after).not.toBe(b);
+    const c = classifyDelta(diffAst(parse(b), parse(after)), h);
+    expect(c.refusals.map((r) => r.directive)).toEqual(["client_max_body_size"]);
   });
 });

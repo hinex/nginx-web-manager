@@ -14,7 +14,16 @@ type Location = HostConfig["locations"][number];
  * function — the classifier refuses that case before it gets here, but this
  * reducer must stay safe when handed edits classified against another state.
  */
-function mergeText(existing: string | null | undefined, text: string, replaces?: string): string {
+function mergeText(existing: string | null | undefined, text: string, replaces?: string, remove?: true): string {
+  if (remove) {
+    // Drop the first entry equal to `text`; a missing entry leaves the text
+    // untouched (the classifier only emits a removal for an existing entry).
+    const want = text.trim();
+    const lines = (existing ?? "").split("\n");
+    const at = lines.findIndex((l) => l.trim() === want);
+    if (at >= 0) lines.splice(at, 1);
+    return lines.join("\n");
+  }
   if (replaces) {
     const want = replaces.trim();
     const lines = (existing ?? "").split("\n");
@@ -56,7 +65,7 @@ export function applyEdits(host: HostConfig, edits: ClassifiedEdit[]): HostConfi
       case "location-advanced":
         next.locations[edit.index] = {
           ...next.locations[edit.index],
-          advanced: mergeText(next.locations[edit.index].advanced, edit.text, edit.replaces),
+          advanced: mergeText(next.locations[edit.index].advanced, edit.text, edit.replaces, edit.remove),
         };
         break;
 
@@ -93,7 +102,7 @@ export function applyEdits(host: HostConfig, edits: ClassifiedEdit[]): HostConfi
         break;
 
       case "server-advanced":
-        next = { ...next, advancedNginx: mergeText(next.advancedNginx, edit.text, edit.replaces) };
+        next = { ...next, advancedNginx: mergeText(next.advancedNginx, edit.text, edit.replaces, edit.remove) };
         break;
     }
   }
