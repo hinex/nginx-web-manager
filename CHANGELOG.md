@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-10-17
+
+### Added
+
+- The Config Editor and the host form warn when `add_header Cache-Control` with a long lifetime
+  (`immutable`, or `max-age` of an hour or more) is sent with `always`. `always` attaches the
+  header to error responses too, so a CDN caches a 404 or 500 for the whole lifetime. The
+  warning never blocks: the save dialog keeps Apply enabled, and a click jumps to the line.
+
+### Fixed
+
+- Editing a line such as `root`, `alias`, `expires` or `proxy_set_header Host` inside an
+  advanced (raw) location in the Config Editor reported "Saved" but kept the old line: the edit
+  went into a typed field the generator does not read for advanced locations. It now replaces
+  the line in the location's raw body.
+- Deleting a line from a server's or an advanced location's raw body in the Config Editor
+  removes it instead of refusing the save.
+
 ## [1.4.0] - 2026-10-17
 
 ### Added
@@ -242,6 +260,7 @@ that publishes managed host configs before upgrading.
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.4.1]: https://github.com/hardskilled/nginx-manager/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/hardskilled/nginx-manager/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/hardskilled/nginx-manager/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/hardskilled/nginx-manager/compare/v1.2.1...v1.2.2
