@@ -505,6 +505,11 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                     </div>
                   )}
 
+                  {/* Headers, basic auth and access list are rendered for every
+                      type except "advanced", whose body is emitted verbatim — the
+                      generator skips them there, so showing them would be a dead
+                      control (NUANCES §64). */}
+                  {location.type !== "advanced" && (<>
                   {/* Headers section */}
                   <div>
                     <div className="flex justify-between items-center mb-2">
@@ -662,6 +667,7 @@ export function LocationsTab({ locations, setLocations, accessLists = [] }: Loca
                       </select>
                     </div>
                   )}
+                  </>)}
                 </div>
               )}
             </div>

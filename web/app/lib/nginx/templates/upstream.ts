@@ -22,15 +22,15 @@ export function buildUpstreamBlock(
     case "random":
       lines.push("    random;");
       break;
-    // round_robin is default — no directive needed
-    // weighted uses weight= on server lines
+    // round_robin is default — no directive needed; "weighted" is
+    // round-robin with weights, which every method below renders anyway
   }
 
   for (const u of upstreams) {
-    const weight =
-      balanceMethod === "weighted" && u.weight > 1
-        ? ` weight=${u.weight}`
-        : "";
+    // nginx honours `weight=` under every balance method, and the form shows
+    // the Weight input for all of them — gating it on "weighted" dropped the
+    // operator's value silently (NUANCES §64).
+    const weight = u.weight > 1 ? ` weight=${u.weight}` : "";
     lines.push(`    server ${u.server}:${u.port}${weight};`);
   }
 
