@@ -103,6 +103,31 @@ const MATRIX: Array<[string, HostConfig]> = [
       ],
     },
   ],
+  [
+    // An advanced location's whole body is `loc.advanced`, rendered verbatim -
+    // so its lines must stay there even when their names collide with typed
+    // location fields (`root`, `expires`) or with proxy boilerplate the
+    // generator emits for *proxy* locations (`proxy_set_header Host`).
+    "advanced location whose lines share names with typed fields",
+    {
+      ...baseHost,
+      locations: [
+        baseLocation,
+        {
+          ...baseLocation,
+          path: "/assets/",
+          type: "advanced",
+          advanced: [
+            "root /srv/static/dist;",
+            "try_files $uri =404;",
+            "expires 1y;",
+            "proxy_set_header Host $host;",
+            "access_log off;",
+          ].join("\n"),
+        },
+      ],
+    },
+  ],
 ];
 
 /**

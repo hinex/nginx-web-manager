@@ -1543,3 +1543,51 @@ describe("advanced buckets on a changed line", () => {
     expect(next.locations[0].advanced).toBe("proxy_read_timeout 30s;\nproxy_buffering off;");
   });
 });
+
+describe("advanced location lines stay in `advanced` (NUANCES §65)", () => {
+  const advancedLoc = (path: string, body: string[]) => ({
+    ...baseHost.locations[0],
+    path,
+    type: "advanced",
+    accessListId: null,
+    basicAuth: null,
+    headers: {},
+    advanced: body.join("\n"),
+  });
+  const host: HostConfig = {
+    ...baseHost,
+    locations: [
+      advancedLoc("/assets/", ["root /srv/static/prod-frontend-dist;", "try_files $uri @frontend;", "access_log off;", "expires 1y;"]),
+      advancedLoc("/images/", ["root /var/static/wl/uat-shared/$host/images;", "try_files $uri @frontend;", "proxy_set_header Host $host;"]),
+    ],
+  };
+  const before = buildServerBlock(host, ACCESS_LISTS);
+  const roundTrip = (after: string) => {
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
+    expect(c.refusals).toEqual([]);
+    return { c, regen: buildServerBlock(applyEdits(host, c.edits), ACCESS_LISTS) };
+  };
+
+  it("rewrites a changed `root` and `try_files` in place instead of a typed field", () => {
+    const after = before
+      .replaceAll("try_files $uri @frontend;", "try_files $uri =404;")
+      .replace("root /var/static/wl/uat-shared/$host/images;", "root /var/static/wl/uat-shared/$host;");
+    const { c, regen } = roundTrip(after);
+    expect(c.edits.every((e) => e.kind === "location-advanced")).toBe(true);
+    expect(regen).toBe(after);
+  });
+
+  it("accepts an edit to the user's own `proxy_set_header Host` line", () => {
+    const after = before.replace("proxy_set_header Host $host;", "proxy_set_header Host example.org;");
+    expect(roundTrip(after).regen).toBe(after);
+  });
+
+  it("refuses deleting a line from the body rather than dropping it silently", () => {
+    // Removal from an advanced body is not mapped yet - a refusal is the
+    // truthful answer until it is. Edit the location's raw body in the form.
+    const after = before.replace(/\n\s*expires 1y;/, "");
+    expect(after).not.toBe(before);
+    const c = classifyDelta(diffAst(parse(before), parse(after)), host);
+    expect(c.refusals.map((r) => r.directive)).toEqual(["expires"]);
+  });
+});

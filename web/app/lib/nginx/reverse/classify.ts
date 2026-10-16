@@ -837,7 +837,21 @@ function classifyServerOrLocationEntry(
   // rather than replacing it, so routing one into `advanced` would send both
   // values to the backend. Refuse only those names — a header the template
   // never emits is the user's own line and falls through to `advanced` below.
-  if (ref.name === "proxy_set_header" && GENERATED_PROXY_HEADERS.has((ref.args[0] ?? "").toLowerCase())) {
+  // An advanced location's body is `loc.advanced` rendered verbatim and nothing
+  // else - the generator emits no fields, headers or access rules into it. Every
+  // line there is the user's own text and belongs in that same field, even when
+  // its name collides with a typed field (`root`, `expires`) or with the proxy
+  // boilerplate below. Mapping one onto a typed field would be accepted and then
+  // wiped by the next regeneration, which never reads that field for this type.
+  const inAdvancedLocation =
+    ref.scope.length === 2 &&
+    ref.scope[0] === "server" &&
+    host.locations[findLocationIndex(host, ref.scope[1])]?.type === "advanced";
+  if (
+    !inAdvancedLocation &&
+    ref.name === "proxy_set_header" &&
+    GENERATED_PROXY_HEADERS.has((ref.args[0] ?? "").toLowerCase())
+  ) {
     refusals.push({ line: ref.line, directive: ref.name, reason: REASON_PROXY_BOILERPLATE });
     return true;
   }
@@ -865,7 +879,7 @@ function classifyServerOrLocationEntry(
     const index = findLocationIndex(host, scope);
     if (index < 0) return false; // unresolvable location — let the final sweep refuse it
     const loc = host.locations[index];
-    const entry = LOCATION_FIELDS[ref.name];
+    const entry = inAdvancedLocation ? undefined : LOCATION_FIELDS[ref.name];
     if (entry) {
       const built = entry.build(ref, loc, index).filter((e) => !isNoOpEdit(e));
       if (built.length === 0) return false; // read part of the line — sweep refuses it
