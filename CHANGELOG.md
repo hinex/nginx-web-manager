@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-10-17
+
+### Fixed
+
+- The web terminal no longer drops after a minute or two of inactivity when the panel is
+  reached through a reverse proxy (an nginx proxy host or Cloudflare). The browser now sends a
+  heartbeat every 25 seconds, which keeps the connection under the proxy's idle timeout. When
+  the connection does close, the message shows the close code or reason.
+
+### Changed
+
+- The image is rebuilt on nginx 1.30.6, the current stable release.
+
 ## [1.4.1] - 2026-10-17
 
 ### Added
@@ -260,6 +273,7 @@ that publishes managed host configs before upgrading.
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.4.2]: https://github.com/hardskilled/nginx-manager/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/hardskilled/nginx-manager/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/hardskilled/nginx-manager/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/hardskilled/nginx-manager/compare/v1.2.2...v1.3.0
