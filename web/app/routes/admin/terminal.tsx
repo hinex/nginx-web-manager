@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
 import { PageHeader } from "~/components/PageHeader";
+import { HEARTBEAT_INTERVAL_MS, PING_MESSAGE } from "~/lib/terminal/protocol";
 
 export function meta() {
   return [{ title: "Terminal — Nginx Manager" }];
@@ -119,12 +120,20 @@ export default function TerminalPage({ loaderData }: Route.ComponentProps) {
         );
       };
 
+      // Keep the socket busy so an idle-timing proxy in front of the panel
+      // does not drop a quiet terminal (see HEARTBEAT_INTERVAL_MS).
+      const heartbeat = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(PING_MESSAGE);
+      }, HEARTBEAT_INTERVAL_MS);
+
       ws.onclose = (event) => {
+        clearInterval(heartbeat);
         setConnected(false);
         if (event.code === 1008) {
           setError(`Connection rejected: ${event.reason || "Unauthorized"}`);
         }
-        term.write("\r\n\x1b[31m[Connection closed]\x1b[0m\r\n");
+        const detail = event.reason ? `: ${event.reason}` : ` (code ${event.code})`;
+        term.write(`\r\n\x1b[31m[Connection closed${detail}]\x1b[0m\r\n`);
       };
 
       // Forward terminal input to WebSocket
@@ -150,6 +159,7 @@ export default function TerminalPage({ loaderData }: Route.ComponentProps) {
       observer.observe(termRef.current);
 
       cleanup = () => {
+        clearInterval(heartbeat);
         observer.disconnect();
         ws.close();
         term.dispose();

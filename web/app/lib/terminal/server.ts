@@ -1,4 +1,5 @@
 import { verifyToken } from "~/lib/auth/jwt.server";
+import { parseTerminalMessage } from "./protocol";
 
 interface TerminalSession {
   proc: ReturnType<typeof Bun.spawn>;
@@ -90,25 +91,13 @@ export function startTerminalServer(port = 3001) {
             ? message
             : new TextDecoder().decode(message as unknown as ArrayBuffer);
 
-        // Handle resize messages (JSON with type: "resize")
-        try {
-          const parsed = JSON.parse(msg);
-          if (
-            parsed.type === "resize" &&
-            typeof parsed.cols === "number" &&
-            typeof parsed.rows === "number"
-          ) {
-            session.proc.terminal?.resize(
-              Math.max(1, parsed.cols),
-              Math.max(1, parsed.rows)
-            );
-            return;
-          }
-        } catch {
-          // Not JSON — treat as stdin data
+        const parsed = parseTerminalMessage(msg);
+        if (parsed.kind === "ping") return; // heartbeat - keeps proxies from idling the socket out
+        if (parsed.kind === "resize") {
+          session.proc.terminal?.resize(parsed.cols, parsed.rows);
+          return;
         }
-
-        session.proc.terminal?.write(msg);
+        session.proc.terminal?.write(parsed.data);
       },
 
       close(ws) {
