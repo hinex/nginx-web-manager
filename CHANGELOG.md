@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-19
+
+### Added
+
+- `map_hash_max_size` and `map_hash_bucket_size` are set in Settings (defaults 8192 and 128).
+  Large `map` blocks, such as redirect lists, no longer need the nginx defaults raised by hand.
+
+### Fixed
+
+- `map_hash_max_size` could not be set anywhere. nginx.conf declares a `map` before the host
+  configs, and nginx fixes the hash sizes at the first `map`, so setting the directive in a host
+  or an included file always failed as a "duplicate" directive. Set the values in Settings and
+  remove the directive from host configs.
+
 ## [1.4.2] - 2026-10-17
 
 ### Fixed
@@ -273,6 +287,7 @@ that publishes managed host configs before upgrading.
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.5.0]: https://github.com/hardskilled/nginx-manager/compare/v1.4.2...v1.5.0
 [1.4.2]: https://github.com/hardskilled/nginx-manager/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/hardskilled/nginx-manager/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/hardskilled/nginx-manager/compare/v1.3.0...v1.4.0
