@@ -5,6 +5,14 @@ import { settings } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "~/lib/auth/middleware";
 import { generateAllConfigs } from "~/lib/nginx/generator";
+import {
+  MAP_HASH_MAX_SIZE_KEY,
+  MAP_HASH_BUCKET_SIZE_KEY,
+  DEFAULT_MAP_HASH_MAX_SIZE,
+  DEFAULT_MAP_HASH_BUCKET_SIZE,
+  MAX_HASH_SIZE,
+  validateHashSize,
+} from "~/lib/nginx/templates/main-config";
 import { reloadNginx } from "~/lib/nginx/reload";
 import { validateNginxConfig } from "~/lib/nginx/validator";
 import { logAudit } from "~/lib/audit/log";
@@ -30,6 +38,8 @@ const SETTING_KEYS = [
   "config_version_retention_days",
   "dns_resolver",
   "dns_resolver_valid",
+  MAP_HASH_MAX_SIZE_KEY,
+  MAP_HASH_BUCKET_SIZE_KEY,
 ] as const;
 
 export function meta() {
@@ -49,6 +59,15 @@ export async function action({ request }: Route.ActionArgs) {
   const currentUser = await requireAdmin(request);
   const formData = await request.formData();
   const ipAddress = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+
+  // Refuse a bad hash size before anything is stored: an empty value means
+  // "use the default", anything else must be a whole number nginx accepts.
+  for (const key of [MAP_HASH_MAX_SIZE_KEY, MAP_HASH_BUCKET_SIZE_KEY]) {
+    const value = ((formData.get(key) as string) ?? "").trim();
+    if (value !== "" && validateHashSize(value) === null) {
+      return { error: `${key} must be a whole number from 1 to ${MAX_HASH_SIZE}` };
+    }
+  }
 
   const changedSettings: Record<string, string> = {};
 
@@ -265,6 +284,45 @@ export default function SettingsPage({ loaderData }: Route.ComponentProps) {
               />
               <p className="text-xs text-muted-foreground mt-1">
                 How long resolved addresses are cached (default: 30s).
+              </p>
+            </div>
+
+            <Separator />
+
+            <div>
+              <Label htmlFor={MAP_HASH_MAX_SIZE_KEY}>map_hash_max_size</Label>
+              <Input
+                id={MAP_HASH_MAX_SIZE_KEY}
+                name={MAP_HASH_MAX_SIZE_KEY}
+                type="number"
+                min={1}
+                max={MAX_HASH_SIZE}
+                defaultValue={currentSettings[MAP_HASH_MAX_SIZE_KEY] ?? ""}
+                placeholder={String(DEFAULT_MAP_HASH_MAX_SIZE)}
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Maximum size of nginx map hash tables (default: {DEFAULT_MAP_HASH_MAX_SIZE}).
+                Raise it when nginx reports "could not build map_hash". Set here, not in a
+                host config - nginx.conf already declares it, so a host copy is a duplicate.
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor={MAP_HASH_BUCKET_SIZE_KEY}>map_hash_bucket_size</Label>
+              <Input
+                id={MAP_HASH_BUCKET_SIZE_KEY}
+                name={MAP_HASH_BUCKET_SIZE_KEY}
+                type="number"
+                min={1}
+                max={MAX_HASH_SIZE}
+                defaultValue={currentSettings[MAP_HASH_BUCKET_SIZE_KEY] ?? ""}
+                placeholder={String(DEFAULT_MAP_HASH_BUCKET_SIZE)}
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Bucket size of nginx map hash tables (default: {DEFAULT_MAP_HASH_BUCKET_SIZE}).
+                Raise it for long map keys.
               </p>
             </div>
 
