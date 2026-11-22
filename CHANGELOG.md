@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-22
+
+### Security
+
+- The image is rebuilt on nginx 1.30.7, the current stable release. It fixes several worker
+  process memory-safety vulnerabilities (HTTP/2, HTTP/3, `resolver`, `try_files` with `alias`,
+  the mail proxy) and an SNI certificate verification issue in the stream module.
+
 ## [1.5.0] - 2026-10-19
 
 ### Added
