@@ -295,6 +295,7 @@ that publishes managed host configs before upgrading.
 
 - Nginx host/config management, terminal, audit log, users & roles, web admin UI.
 
+[1.5.1]: https://github.com/hardskilled/nginx-manager/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/hardskilled/nginx-manager/compare/v1.4.2...v1.5.0
 [1.4.2]: https://github.com/hardskilled/nginx-manager/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/hardskilled/nginx-manager/compare/v1.4.0...v1.4.1
